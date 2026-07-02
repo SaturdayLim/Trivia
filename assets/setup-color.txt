@@ -1,0 +1,56 @@
+# ============================================================
+#  STACK TRIVIA — COLOUR SETUP
+#  Edit the hex codes below, save, and restart the game
+#  (or run the ReloadColors macro) to apply.
+#
+#  Format:  Key = #RRGGBB
+#  Lines starting with # are comments and are ignored.
+#  Any key you delete or mistype falls back to its default.
+# ============================================================
+
+# ---- Team colours (score backboard + plus-button glow) ----
+Team1 = #4472C4
+Team2 = #ED7D31
+Team3 = #70AD47
+Team4 = #FFC000
+
+# ---- Difficulty colours (arcs, difficulty buttons, question title) ----
+DiffEasy = #00FF00
+DiffMed  = #FFFF00
+DiffHard = #FF0000
+
+# Unused arc slots on the Question Select wheel
+ArcUnused = #FFFFFF
+
+# ---- Answer options on the Question slide ----
+# Idle (unselected) state
+OptionIdleFill = #D9D9D9
+OptionIdleText = #000000
+OptionIdleGlow = #D9D9D9
+# Glow around the option a team has picked
+SelectGlow = #FFFF00
+# Reveal colours
+CorrectColor = #00FF00
+WrongColor   = #FF0000
+
+# ---- Scoring buttons ----
+# Backboard fill when minus / nil is chosen
+MinusFill = #FF0000
+NilFill   = #FFFFFF
+# Glow on the active scoring button
+MinusGlow = #FF0000
+NilGlow   = #FFFFFF
+PlusGlow  = #00FF00
+
+# ---- Phase selector (Cat Home slide) ----
+PhaseGlow       = #FFFF00
+PhaseLineActive = #000000
+PhaseLineIdle   = #FFFFFF
+
+# ---- Misc ----
+# "Next" arrow glow on setup slides
+ArrowGlow = #00FF00
+# Team-count bulbs
+BulbOn   = #FF0000
+BulbOff  = #000000
+BulbGlow = #FFFFFF
