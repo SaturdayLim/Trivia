@@ -1,0 +1,9 @@
+# Live Firebase credentials (copy from firebase-config.example.js)
+js/sync/firebase-config.js
+
+# Office lock files
+~$*
+
+# OS noise
+Thumbs.db
+.DS_Store
