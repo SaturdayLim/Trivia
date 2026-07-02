@@ -4,7 +4,7 @@ Objective: web-app version of the Stack trivia game. Static frontend (GitHub Pag
 Firebase Spark realtime sync behind a swappable adapter. Roles: Player / GM / Display.
 Questions live as one Markdown file per category in this repo.
 
-## Status: PHASE 0 — planning & scaffold (build started 2026-07-02)
+## Status: PHASE 1 — foundations build (rules mined, PRD final 2026-07-03)
 
 ## Decisions locked (interview 2026-07-02)
 | Area | Decision |
@@ -14,7 +14,7 @@ Questions live as one Markdown file per category in this repo.
 | Turn order | Settings-driven: round 1 = registration order; later rounds winner-first or loser-first; persist-per-round OR recalc-per-rotation |
 | Selector | Tap-in race among active team's players decides selector |
 | Rounds | GM sets number of rounds (stages) and rotations per round; current game has 4 stages (Leaderboard!S10:S13) |
-| Game modes | v6 has 4 phases: Comm(1), Solo(2), Crown(3), Target(4) — exact semantics being mined from sources |
+| Game modes | COMMUNITY / EXCLUSIVE / CONTEST / SUDDEN DEATH — full semantics in docs/RULES-v6.md |
 | Scoring | Base 1/2/3 (E/M/H) × per-round multiplier; penalty per round: on/off/half |
 | Challenge | Symmetric stakes: ±full multiplied value; selector-only questions; per-team earliest lock |
 | Open answer | Per-round flag; every team's earliest lock scored independently, full value |
@@ -32,8 +32,11 @@ Questions live as one Markdown file per category in this repo.
 3. Confirm: vanilla-JS stack, challenge visibility rule (does challenger see selecting team's locked answer before challenging?), Crown/Target phase semantics if mining is inconclusive.
 
 ## Next
-- Mine v6 rules (agent) → docs/RULES-v6.md
-- Write docs/PRD.md → scaffold app → engine → screens → Firebase driver → tests → deploy
+- T3 parser/validator, T4 importer, T5 sync layer (agents)
+- Then T6 engine → T7 UI → T8 Firebase driver → T9 integration test
+- NOTE 2026-07-03: first 4-agent wave died on the session token limit (the mining
+  agent read giant pptx XMLs raw); rules were re-mined inline with targeted greps.
+  Keep agent briefs surgical; never let an agent read whole Office XML files.
 
 ## Resume instructions (fresh session)
 Read this file + docs/PRD.md + docs/DECISIONS.md. Source game: ..\Stack\ (v6 Excel+PPT).

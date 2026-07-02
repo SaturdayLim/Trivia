@@ -2,8 +2,7 @@
 
 Version 1.0 — 2026-07-02. Author: lead model (Fable). Sub-agents: build ONLY from this
 document plus the task brief you are given; do not invent mechanics not specified here.
-Sections marked `[PENDING-MINING]` will be patched from docs/RULES-v6.md; treat their
-provisional rule as spec until patched.
+Game-rule provenance: docs/RULES-v6.md (mined from the v6 Excel/PPT implementation).
 
 ## 1. Overview
 
@@ -56,8 +55,10 @@ Answer: A
 Fact: First non-English-language film to win Best Picture.
 ```
 Rules:
-- Question IDs are headings `## E1..E4, M1..M4, H1..H4` — exactly 12 per category,
-  4 per difficulty (E/M/H). Parser errors on duplicates, gaps, or other IDs.
+- Question IDs are headings `## E<n>`, `## M<n>`, `## H<n>` — at least one per
+  difficulty, numbered sequentially from 1 (no gaps, no duplicates; any other ID
+  errors). Files commonly hold ~30 questions (the legacy bank averages 10 per
+  difficulty); the game draws a fresh subset at setup (§4.7).
 - `Q:` text runs until the `A)` line; may span multiple lines (joined with newline
   preserved for display).
 - Exactly four options `A)`–`D)`, single line each.
@@ -90,17 +91,20 @@ the app and both tools — one grammar, one implementation.
   join an existing team mid-game (never create one after lock).
 
 ### 4.2 Rounds, rotations, turns
-- Game = ordered list of **rounds** (GM default 4, matching v6's four stages). Each
-  round has: `rotations` (int ≥1), `multiplier` (int ≥1), `penalty` (`on|off|half`),
-  `mode` (`solo|comm|crown|target` — see 4.4), `challenge` (bool), `timerSec`
-  (0 = no timer).
+- Game = ordered list of **rounds**. Each round has: `mode` (see 4.4), `rotations`
+  (int ≥1), `multiplier` (int ≥1), `penalty` (`on|off|half`), `orderMode`
+  (`registration|winnerFirst|loserFirst`), `timerSec` (0 = no timer). Defaults =
+  the four v6 stages in order: COMMUNITY (registration, ×1, off, 3 rotations),
+  EXCLUSIVE (winnerFirst, ×1, on, 3), CONTEST (loserFirst, ×1, contestor rule, 1),
+  SUDDEN DEATH (loserFirst, ×2, on, 1). GM may add/remove/reorder/edit rounds.
 - **Rotation** = every team takes exactly one turn.
 - **Turn** = active team taps in → selector chooses category+difficulty → question
   plays out → scored → next team.
-- Team order: round 1 = registration order. Later rounds per `orderMode`
-  (`winnerFirst|loserFirst`, by cumulative score; ties broken by registration order)
-  and `orderRecalc` (`perRound` — computed at round start, held; `perRotation` —
-  recomputed each rotation start).
+- Team order: per-round `orderMode` — `registration` (GM-set lobby order; v6's
+  "Youngest" convention is applied by the GM when ordering) or
+  `winnerFirst`/`loserFirst` by cumulative score, ties broken by registration
+  order. Global `orderRecalc`: `perRound` (computed at round start, held) or
+  `perRotation` (recomputed at each rotation start). Round 1 always registration.
 - Round ends after its rotations complete; game ends after last round (GM may end
   round/game early). Final standings = cumulative scores.
 
@@ -110,14 +114,18 @@ TAP IN button. First successful claim (adapter transaction, first-write-wins) ma
 that player the **selector**; teammates' screens show who won. Selector alone picks
 category and difficulty from the board.
 
-### 4.4 Round modes `[PENDING-MINING]`
-v6 has four GM-selected phases: **Comm(1), Solo(2), Crown(3), Target(4)**. Confirmed
-so far: Solo = only the selecting team answers; Comm = all teams answer (each team's
-earliest lock counts, each scored independently at full value). Crown and Target
-semantics are being extracted from the v6 sources; until patched, the engine must
-implement modes behind a strategy interface (`whoMayAnswer(state)`,
-`scoreOutcome(locks, correct, roundCfg)`) so new modes drop in without state-machine
-changes. Ship Solo + Comm first; Crown/Target follow the patch.
+### 4.4 Round modes (the four v6 stages — provenance in docs/RULES-v6.md §A)
+| mode | v6 name | who may answer | penalty applies to |
+|---|---|---|---|
+| `community` | 01 COMMUNITY | every team | all answering teams (default off) |
+| `exclusive` | 02 EXCLUSIVE | selecting team only | selecting team |
+| `contest` | 03 CONTEST | selecting team + contestors | contestors only (selector exempt) |
+| `suddendeath` | 04 SUDDEN DEATH | every team | all answering teams (default ×2 points) |
+
+Each team's earliest lock is its answer; teams score independently. The engine
+implements modes behind a strategy interface (`mayAnswer(teamId, state)`,
+`scoreOutcome(locks, correct, roundCfg)`) so variants drop in without state-machine
+changes.
 
 ### 4.5 Question lifecycle
 ```
@@ -138,25 +146,28 @@ board → (tap-in) → selecting → open → [locking…] → revealed → scor
 
 ### 4.6 Scoring
 - Question value = difficulty base (Easy 1, Medium 2, Hard 3) × round `multiplier`.
-- Correct team: +value. Wrong locked answer: −value if round penalty `on`,
-  −ceil(value/2) if `half`, 0 if `off`. No lock: 0.
-- Applies to every eligible answering team (mode-dependent).
-- **Challenge** (when round `challenge` = true and mode = solo): after the selecting
-  team's choice is public and before reveal, any other team may lock a *different*
-  option and arm CHALLENGE (UI enforces a contrasting pick; team's earliest lock rule
-  applies). At reveal: challenger's pick correct → +value; otherwise → −value
-  (symmetric, always full value regardless of penalty mode). Multiple teams may
-  challenge independently. `[PENDING-MINING: confirm exact v6 stakes]`
+- Correct team: +value. Wrong locked answer, when the round's penalty applies to
+  that team: −value if `on`, −ceil(value/2) if `half`, 0 if `off`. No lock: 0.
+- **Contest** (mode `contest`): the selecting team answers with no penalty exposure
+  (wrong = 0 regardless of penalty setting). Once the selecting team's choice is
+  public and until reveal, any other team may lock a *different* option to become a
+  contestor (UI enforces a contrasting pick; earliest lock per team). At reveal each
+  contestor resolves independently: correct → +value, wrong → −value (symmetric
+  full value; contestors always bear this risk regardless of penalty setting).
+- **Sudden death** (mode `suddendeath`): community-style all-team answering with
+  penalty default `on` and round multiplier default 2.
 - GM may additionally adjust any team's total at any time from the GM console
-  (bonus/correction, mirrors v6 bonus column).
+  (bonus/correction, mirrors v6 bonus column O2:O5).
 
 ### 4.7 Board and exhaustion
 - Board = GM-picked categories (default 10, setting `boardSize`) from the repo pool.
   Setup shows each category's fresh-question count (after exclusions).
-- Each board category exposes E/M/H tiers with remaining counts (4 each when fresh).
-  A consumed question leaves the pool; a specific question is drawn randomly from the
-  chosen tier. Empty tier → difficulty button disabled. Empty category → tile hidden
-  (v6 behavior). All empty → GM prompted to end game.
+- At setup the game draws `tierSize` (default 4) random fresh questions per
+  difficulty per board category — the classic 12-per-category board. Each board
+  category exposes E/M/H tiers with remaining counts. Selecting a difficulty draws
+  randomly from that tier; consumed questions leave the pool. Empty tier →
+  difficulty button disabled. Empty category → tile hidden (v6 behavior). All
+  empty → GM prompted to end game.
 - Used-question memory: the GM device persists used refs in localStorage across
   sessions. Setup offers "exclude previously used" (default on) + a reset. Used refs
   are recorded when a question reaches `revealed`.
@@ -201,10 +212,12 @@ Drivers implement `{connect, update, transact, subscribe, presence, offsetProbe}
 {
   "meta":   { "createdAt": 0, "gmClientId": "…", "status": "lobby|playing|ended" },
   "settings": {
-    "orderMode": "winnerFirst|loserFirst", "orderRecalc": "perRound|perRotation",
+    "orderRecalc": "perRound|perRotation", "tierSize": 4,
     "boardSize": 10, "categories": ["movie-night", "…"], "excludeUsed": true,
-    "rounds": [ { "rotations": 2, "multiplier": 1, "penalty": "off",
-                  "mode": "solo", "challenge": false, "timerSec": 0 } ]
+    "rounds": [ { "mode": "community|exclusive|contest|suddendeath",
+                  "rotations": 3, "multiplier": 1, "penalty": "on|off|half",
+                  "orderMode": "registration|winnerFirst|loserFirst",
+                  "timerSec": 0 } ]
   },
   "teams":  { "t1": { "name": "…", "color": "#4472C4", "order": 0, "score": 0,
                       "players": { "p_ab12": { "name": "…" } } } },
@@ -219,7 +232,7 @@ Drivers implement `{connect, update, transact, subscribe, presence, offsetProbe}
       "value": 2, "openedAt": 0, "deadline": 0,
       "payload": { "q": "…", "options": ["…","…","…","…"] },   // answer NOT synced
       "locks": { "t1": { "playerId": "p_ab12", "choice": "A", "at": 0 } },
-      "challenges": { "t2": true },
+      // contest mode: a non-selecting team's lock IS its contest entry
       "result": { "correct": "A", "deltas": { "t1": 2, "t2": -2 }, "fact": null }
     },
     "log": [ { "ref": "…", "round": 0, "deltas": {}, "at": 0 } ]
@@ -241,8 +254,8 @@ GM writes `result` (correct + deltas). Fun fact never syncs at all.
 
 **Player**: role select → join (code, name) → team pick/create → lobby → in game:
 tap-in screen (when eligible), board view (read-only or selecting), question screen
-(options, lock state, challenge button when armed-able, timer), reveal, standings
-between rounds. Mobile-first, thumb-sized targets.
+(options, lock state, CONTEST counter-pick flow in contest rounds, timer), reveal,
+standings between rounds. Mobile-first, thumb-sized targets.
 
 **GM console** (tablet/laptop layout): room create + QR; registration manager
 (rename/reorder/lock); settings editor (global + per-round rows matching 4.2); in
@@ -273,10 +286,11 @@ entry/display screens. Dark background, high contrast, readable at distance.
    both recalc modes, ties by registration order.
 7. Locks immutable; earliest per team wins; selecting team's choice publicly visible
    pre-reveal.
-8. Comm mode: every team's earliest lock scored independently; Solo: only selecting
-   team may lock (others read-only) unless challenging.
-9. Challenge: only when enabled + solo; contrasting option enforced; symmetric
-   ±value applied; multiple simultaneous challengers all resolve.
+8. Mode matrix: community/suddendeath — every team's earliest lock scored
+   independently; exclusive — only the selecting team may lock (others read-only);
+   contest — contestors may lock only after the selector's public lock exists.
+9. Contest: contrasting option enforced; selector penalty-exempt; symmetric ±full
+   value per contestor; multiple simultaneous contestors all resolve independently.
 10. Scoring math: value = base(1/2/3) × multiplier; penalty on/half/off; no-lock = 0;
     verified by unit fixtures run in tools/validate.html or a test page.
 11. Reveal: GM-only trigger; fun fact never appears in player/display DOM nor in
@@ -302,7 +316,7 @@ entry/display screens. Dark background, high contrast, readable at distance.
   (unit-testable without DOM), one file per screen in ui/.
 
 ## 9. Open items
-- `[PENDING-MINING]` Crown/Target mode mechanics; exact v6 challenge stakes; RSN
-  schedule formula (docs/RULES-v6.md patch → §4.4/§4.6).
 - User: Firebase config (Task 10); GitHub repo + Pages (Task 11); confirm vanilla
-  stack (provisional); confirm challenge visibility rule matches table play.
+  stack (provisional); confirm contest flow matches table play (selector's lock
+  public → contestors counter-pick a different option); confirm variable
+  per-category question counts (bank ≈30/cat) with 12 drawn per game board.
