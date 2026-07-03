@@ -1,0 +1,473 @@
+/**
+ * @file The ONLY layer that touches the sync adapter (PRD §5.1/§5.2). Every
+ * export takes `(sync, ...)` and returns a Promise.
+ *
+ * GM-authority actions resolve `null` (no-op) unless called with
+ * `role === 'gm'` — the adapter itself is role-agnostic, so this module is
+ * where that authority rule is enforced.
+ *
+ * Every write is path-scoped and small on purpose, not just by style:
+ * `setAtPath` (adapter.js) shallow-copies one level per path segment, so
+ * `update('game/round', …)` preserves sibling keys (`game/board`,
+ * `game/question`, …) automatically, whereas `update('game', {round: …})`
+ * would silently replace — i.e. delete — all of those siblings. The one
+ * sanctioned whole-tree write is `createRoomState`, at room creation.
+ */
+
+import { getAtPath, splitPath } from '../sync/adapter.js';
+import { questionValue, MODES, DEFAULT_ROUNDS } from './scoring.js';
+import { advanceTurn, computeOrder } from './scheduler.js';
+import { parseRef } from './questions.js';
+
+/**
+ * One-shot synchronous read of a synced path. Relies on `sync.onChange`
+ * invoking its callback immediately, before returning the unsubscribe
+ * function (see adapter.js's `onChange`) — so this never leaves a dangling
+ * subscription behind.
+ * @param {import('../sync/adapter.js').SyncHandle} sync
+ * @param {string} path
+ * @returns {any}
+ */
+function readPath(sync, path) {
+  let value;
+  sync.onChange(path, (v) => {
+    value = v;
+  })();
+  return value;
+}
+
+function removeIdFromTier(board, slug, dif, id) {
+  const tier = (board[slug] && board[slug][dif]) || [];
+  return { ...board, [slug]: { ...board[slug], [dif]: tier.filter((x) => x !== id) } };
+}
+
+function addIdToTier(board, slug, dif, id) {
+  const tier = (board[slug] && board[slug][dif]) || [];
+  if (tier.includes(id)) return board;
+  return { ...board, [slug]: { ...board[slug], [dif]: [...tier, id] } };
+}
+
+// ---------------------------------------------------------------------------
+// GM-authority actions
+// ---------------------------------------------------------------------------
+
+/**
+ * Create a room's full state tree (PRD §5.3) and write it once.
+ * @param {import('../sync/adapter.js').SyncHandle} sync
+ * @param {string} role
+ * @param {Object} opts
+ * @param {string} opts.clientId - stamped into `meta.gmClientId`.
+ * @param {Object} [opts.settings] - partial settings; `rounds` defaults to
+ *   `scoring.DEFAULT_ROUNDS`, other fields to PRD §5.3 defaults.
+ * @param {Array<{id: string, name: string, color: string, order: number}>} opts.teams
+ * @returns {Promise<?Object>} the written tree, or `null` if `role !== 'gm'`.
+ */
+export async function createRoomState(sync, role, { clientId, settings = {}, teams }) {
+  if (role !== 'gm') return null;
+  const teamsMap = {};
+  for (const t of teams) {
+    teamsMap[t.id] = { name: t.name, color: t.color, order: t.order, score: 0, players: {} };
+  }
+  const tree = {
+    meta: { createdAt: sync.serverNow(), gmClientId: clientId, status: 'lobby', registrationLocked: false },
+    settings: {
+      orderRecalc: settings.orderRecalc || 'perRound',
+      tierSize: settings.tierSize || 4,
+      boardSize: settings.boardSize || 10,
+      categories: settings.categories || [],
+      excludeUsed: settings.excludeUsed !== false,
+      rounds: settings.rounds && settings.rounds.length ? settings.rounds : DEFAULT_ROUNDS,
+    },
+    teams: teamsMap,
+    clients: {},
+    game: {
+      round: 0,
+      rotation: 0,
+      turnIdx: 0,
+      teamOrder: [],
+      activeTeam: null,
+      tapIn: { openFor: null, winner: null },
+      board: {},
+      question: null,
+      log: [],
+    },
+  };
+  await sync.update('/', tree);
+  return tree;
+}
+
+/**
+ * Write the drawn board (from `board.buildBoard`) into synced state. Kept as
+ * an action so the UI never writes sync paths directly.
+ * @param {import('../sync/adapter.js').SyncHandle} sync
+ * @param {string} role
+ * @param {Object<string, {E: string[], M: string[], H: string[]}>} board
+ * @returns {Promise<?Object>} the board, or `null` if `role !== 'gm'`.
+ */
+export async function setBoard(sync, role, board) {
+  if (role !== 'gm') return null;
+  await sync.update('game/board', board);
+  return board;
+}
+
+/**
+ * Lobby -> playing. Seats round 1 in `registration` order — ALWAYS, per PRD
+ * §4.2, regardless of round 0's configured `orderMode`. Does not itself open
+ * tap-in; call `openTapIn(sync, role, activeTeam)` next.
+ * @param {import('../sync/adapter.js').SyncHandle} sync
+ * @param {string} role
+ * @returns {Promise<?{teamOrder: string[], activeTeam: ?string}>}
+ */
+export async function startGame(sync, role) {
+  if (role !== 'gm') return null;
+  const teams = readPath(sync, 'teams') || {};
+  const teamOrder = computeOrder({ teams, mode: 'registration' });
+  const activeTeam = teamOrder[0] ?? null;
+  await sync.update('meta/status', 'playing');
+  await sync.update('game/round', 0);
+  await sync.update('game/rotation', 0);
+  await sync.update('game/turnIdx', 0);
+  await sync.update('game/teamOrder', teamOrder);
+  await sync.update('game/activeTeam', activeTeam);
+  return { teamOrder, activeTeam };
+}
+
+/**
+ * Open the tap-in gate for `nextTeamId` (clears any previous winner).
+ * @param {import('../sync/adapter.js').SyncHandle} sync
+ * @param {string} role
+ * @param {string} nextTeamId
+ * @returns {Promise<?{openFor: string}>}
+ */
+export async function openTapIn(sync, role, nextTeamId) {
+  if (role !== 'gm') return null;
+  await sync.update('game/tapIn', { openFor: nextTeamId, winner: null });
+  return { openFor: nextTeamId };
+}
+
+/**
+ * The selector's category+difficulty choice becomes the live question.
+ * `ref` must already have been drawn (e.g. via `board.drawQuestion`) — this
+ * only removes it from the synced board and opens the `selecting` state.
+ * @param {import('../sync/adapter.js').SyncHandle} sync
+ * @param {string} role
+ * @param {string} ref - "slug:id", e.g. "movie-night:E1".
+ * @param {{q: string, options: string[]}} payloadWithoutAnswer - never
+ *   includes `answer`/`fact` (PRD §5.3: the wire never carries them pre-reveal).
+ * @returns {Promise<?{ref: string, value: number}>}
+ */
+export async function selectQuestion(sync, role, ref, payloadWithoutAnswer) {
+  if (role !== 'gm') return null;
+  const { slug, id } = parseRef(ref);
+  const dif = id[0];
+  const round = readPath(sync, 'game/round');
+  const rounds = readPath(sync, 'settings/rounds') || [];
+  const roundCfg = rounds[round];
+  const value = questionValue(dif, roundCfg);
+  const board = readPath(sync, 'game/board') || {};
+  await sync.update('game/board', removeIdFromTier(board, slug, dif, id));
+  await sync.update('game/question', {
+    ref,
+    state: 'selecting',
+    value,
+    openedAt: 0,
+    deadline: 0,
+    payload: payloadWithoutAnswer,
+    locks: {},
+    result: null,
+  });
+  return { ref, value };
+}
+
+/**
+ * Open the question for locking.
+ * @param {import('../sync/adapter.js').SyncHandle} sync
+ * @param {string} role
+ * @param {number} deadline - epoch ms, or 0 for no timer.
+ * @returns {Promise<?{deadline: number}>}
+ */
+export async function openQuestion(sync, role, deadline) {
+  if (role !== 'gm') return null;
+  await sync.update('game/question/state', 'open');
+  await sync.update('game/question/openedAt', sync.serverNow());
+  await sync.update('game/question/deadline', deadline || 0);
+  return { deadline: deadline || 0 };
+}
+
+/**
+ * Reveal the correct answer and compute (but do not yet apply) scores via
+ * `scoring.MODES[roundCfg.mode].scoreOutcome`. Per PRD §4.7, used-question
+ * memory is recorded when a question reaches `revealed` (not at
+ * `commitScores`) — `onUsedRef`, if given, is called once with the revealed
+ * ref so the caller can pipe it to `storage.recordUsed`. Team totals are
+ * NOT updated here (acceptance criterion 12 requires the GM be able to edit
+ * deltas before they commit); call `commitScores` to apply them.
+ * @param {import('../sync/adapter.js').SyncHandle} sync
+ * @param {string} role
+ * @param {'A'|'B'|'C'|'D'} correct
+ * @param {(ref: string) => void} [onUsedRef]
+ * @returns {Promise<?{deltas: Object<string, number>}>}
+ */
+export async function revealQuestion(sync, role, correct, onUsedRef) {
+  if (role !== 'gm') return null;
+  const question = readPath(sync, 'game/question');
+  if (!question) return null;
+  const round = readPath(sync, 'game/round');
+  const rounds = readPath(sync, 'settings/rounds') || [];
+  const roundCfg = rounds[round];
+  const selectingTeamId = readPath(sync, 'game/activeTeam');
+  const teamIds = Object.keys(readPath(sync, 'teams') || {});
+  const { deltas } = MODES[roundCfg.mode].scoreOutcome({
+    locks: question.locks || {},
+    correct,
+    roundCfg,
+    selectingTeamId,
+    teamIds,
+    value: question.value,
+  });
+  await sync.update('game/question/state', 'revealed');
+  await sync.update('game/question/result', { correct, deltas, fact: null });
+  if (typeof onUsedRef === 'function') onUsedRef(question.ref);
+  return { deltas };
+}
+
+/**
+ * Apply final (possibly GM-overridden) per-team deltas: updates team scores,
+ * appends a log entry, and marks the question `scored`.
+ * @param {import('../sync/adapter.js').SyncHandle} sync
+ * @param {string} role
+ * @param {?Object<string, number>} [overriddenDeltas] - defaults to the
+ *   deltas `revealQuestion` computed (`game/question/result/deltas`).
+ * @returns {Promise<?{deltas: Object<string, number>}>}
+ */
+export async function commitScores(sync, role, overriddenDeltas) {
+  if (role !== 'gm') return null;
+  const question = readPath(sync, 'game/question');
+  if (!question || !question.result) return null;
+  const finalDeltas = overriddenDeltas || question.result.deltas || {};
+  for (const [teamId, delta] of Object.entries(finalDeltas)) {
+    if (!delta) continue;
+    await sync.transact(`teams/${teamId}/score`, (cur) => (cur || 0) + delta);
+  }
+  const round = readPath(sync, 'game/round');
+  await sync.transact('game/log', (cur) => [
+    ...(cur || []),
+    { ref: question.ref, round, deltas: finalDeltas, at: sync.serverNow() },
+  ]);
+  await sync.update('game/question/result/deltas', finalDeltas);
+  await sync.update('game/question/state', 'scored');
+  return { deltas: finalDeltas };
+}
+
+/**
+ * Abort the current question pre-reveal; its ref returns to the board unused.
+ * @param {import('../sync/adapter.js').SyncHandle} sync
+ * @param {string} role
+ * @returns {Promise<?{ref: string}>}
+ */
+export async function skipQuestion(sync, role) {
+  if (role !== 'gm') return null;
+  const question = readPath(sync, 'game/question');
+  if (!question || !question.ref) return null;
+  const { slug, id } = parseRef(question.ref);
+  const dif = id[0];
+  const board = readPath(sync, 'game/board') || {};
+  await sync.update('game/board', addIdToTier(board, slug, dif, id));
+  await sync.update('game/question', null);
+  return { ref: question.ref };
+}
+
+/**
+ * Advance to the next turn via `scheduler.advanceTurn`, writing the new turn
+ * state and opening tap-in for the new active team (or ending the game).
+ * @param {import('../sync/adapter.js').SyncHandle} sync
+ * @param {string} role
+ * @returns {Promise<?import('./scheduler.js').NextTurn>}
+ */
+export async function advance(sync, role) {
+  if (role !== 'gm') return null;
+  const round = readPath(sync, 'game/round');
+  const rotation = readPath(sync, 'game/rotation');
+  const turnIdx = readPath(sync, 'game/turnIdx');
+  const teamOrder = readPath(sync, 'game/teamOrder') || [];
+  const teams = readPath(sync, 'teams') || {};
+  const rounds = readPath(sync, 'settings/rounds') || [];
+  const orderRecalc = readPath(sync, 'settings/orderRecalc') || 'perRound';
+
+  const next = advanceTurn({ round, rotation, turnIdx, teamOrder, teams }, { rounds, orderRecalc });
+
+  if (next.phase === 'gameEnd') {
+    await sync.update('meta/status', 'ended');
+    return next;
+  }
+
+  await sync.update('game/round', next.round);
+  await sync.update('game/rotation', next.rotation);
+  await sync.update('game/turnIdx', next.turnIdx);
+  await sync.update('game/teamOrder', next.teamOrder);
+  await sync.update('game/activeTeam', next.activeTeam);
+  await openTapIn(sync, role, next.activeTeam);
+  return next;
+}
+
+/**
+ * Freeze/unfreeze self-serve registration (players can still join existing
+ * teams mid-game per PRD §4.1; this gates team CREATION and renames).
+ * @returns {Promise<?boolean>}
+ */
+export async function lockRegistration(sync, role, locked) {
+  if (role !== 'gm') return null;
+  await sync.update('meta/registrationLocked', !!locked);
+  return !!locked;
+}
+
+/**
+ * GM edit of a team's display fields (rename / recolor / reorder — order
+ * drives round-1 turn order).
+ * @param {Object} patch - any of {name, color, order}
+ * @returns {Promise<?Object>}
+ */
+export async function gmUpdateTeam(sync, role, teamId, patch) {
+  if (role !== 'gm') return null;
+  for (const key of ['name', 'color', 'order']) {
+    if (patch[key] !== undefined) await sync.update(`teams/${teamId}/${key}`, patch[key]);
+  }
+  return patch;
+}
+
+/**
+ * GM: freeze answering at timer expiry (lockAnswer guards state === 'open',
+ * so 'locked' blocks further locks; reveal accepts either state).
+ * @returns {Promise<?boolean>}
+ */
+export async function lockQuestion(sync, role) {
+  if (role !== 'gm') return null;
+  const state = readPath(sync, 'game/question/state');
+  if (state !== 'open') return null;
+  await sync.update('game/question/state', 'locked');
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Player actions
+// ---------------------------------------------------------------------------
+
+/**
+ * Announce this client in the room roster (idempotent; call on every join
+ * and rejoin so refreshed tabs restore their seat).
+ */
+export async function registerClient(sync, { clientId, role, name, teamId = null }) {
+  await sync.update(`clients/${clientId}`, { role, name, teamId });
+}
+
+/**
+ * Create a team (first-write-wins on the id) and seat the creator in it.
+ * Refused while registration is locked.
+ * @returns {Promise<{committed: boolean, reason?: string}>}
+ */
+export async function createTeam(sync, { teamId, name, color, order, playerId, playerName }) {
+  if (readPath(sync, 'meta/registrationLocked')) return { committed: false, reason: 'registration-locked' };
+  const { committed } = await sync.transact(`teams/${teamId}`, (cur) =>
+    cur == null ? { name, color, order, score: 0, players: { [playerId]: { name: playerName } } } : undefined
+  );
+  if (committed) await registerClient(sync, { clientId: playerId, role: 'player', name: playerName, teamId });
+  return { committed, reason: committed ? undefined : 'team-id-taken' };
+}
+
+/**
+ * Join an existing team (allowed mid-game per PRD §4.1).
+ * @returns {Promise<{committed: boolean, reason?: string}>}
+ */
+export async function joinTeam(sync, { teamId, playerId, playerName }) {
+  const team = readPath(sync, `teams/${teamId}`);
+  if (!team) return { committed: false, reason: 'no-such-team' };
+  await sync.update(`teams/${teamId}/players/${playerId}`, { name: playerName });
+  await registerClient(sync, { clientId: playerId, role: 'player', name: playerName, teamId });
+  return { committed: true };
+}
+
+/**
+ * The tap-in winner requests a category+difficulty. Players never draw or
+ * open questions themselves (GM is the sole authority): this writes an
+ * intent the GM client observes (`onChange('game/selectIntent')`), validates,
+ * and fulfils via drawQuestion + selectQuestion + openQuestion, then clears.
+ * @returns {Promise<{committed: boolean, reason?: string}>}
+ */
+export async function requestSelection(sync, { playerId, teamId, slug, dif }) {
+  const tapIn = readPath(sync, 'game/tapIn');
+  if (!tapIn || tapIn.winner !== playerId) return { committed: false, reason: 'not-selector' };
+  const activeTeam = readPath(sync, 'game/activeTeam');
+  if (activeTeam !== teamId) return { committed: false, reason: 'not-active-team' };
+  if (readPath(sync, 'game/question')) return { committed: false, reason: 'question-in-progress' };
+  const { committed } = await sync.transact('game/selectIntent', (cur) =>
+    cur == null ? { playerId, teamId, slug, dif, at: sync.serverNow() } : undefined
+  );
+  return { committed, reason: committed ? undefined : 'intent-pending' };
+}
+
+/**
+ * GM: clear a fulfilled (or rejected) selection intent.
+ * @returns {Promise<?boolean>}
+ */
+export async function clearSelectIntent(sync, role) {
+  if (role !== 'gm') return null;
+  await sync.update('game/selectIntent', null);
+  return true;
+}
+
+/**
+ * Claim the tap-in for `teamId` (first write wins). No-op unless the gate is
+ * currently open for this team.
+ * @param {import('../sync/adapter.js').SyncHandle} sync
+ * @param {string} teamId
+ * @param {string} playerId
+ * @returns {Promise<{committed: boolean, winner: ?string}>}
+ */
+export async function claimTapIn(sync, teamId, playerId) {
+  // Transact on the whole gate, not just `winner`: the gate check must be
+  // atomic with the claim, or a straggler tap could win a gate the GM has
+  // since re-opened for a different team (openTapIn resets winner to null).
+  const { committed, snapshot } = await sync.transact('game/tapIn', (cur) =>
+    cur && cur.openFor === teamId && cur.winner == null ? { ...cur, winner: playerId } : undefined
+  );
+  return { committed, winner: getAtPath(snapshot, splitPath('game/tapIn/winner')) ?? null };
+}
+
+/**
+ * Lock `teamId`'s answer (its earliest lock wins; immutable thereafter).
+ * Re-asserts mode eligibility (`MODES[mode].mayAnswer`) and, in `contest`
+ * mode for a non-selecting team, that `choice` differs from the selector's
+ * public lock — defense in depth behind whatever the UI already enforces.
+ * @param {import('../sync/adapter.js').SyncHandle} sync
+ * @param {string} teamId
+ * @param {string} playerId
+ * @param {'A'|'B'|'C'|'D'} choice
+ * @param {number} serverNow
+ * @returns {Promise<{committed: boolean, reason?: string, lock?: Object}>}
+ */
+export async function lockAnswer(sync, teamId, playerId, choice, serverNow) {
+  const question = readPath(sync, 'game/question');
+  if (!question || question.state !== 'open') return { committed: false, reason: 'not-open' };
+
+  const round = readPath(sync, 'game/round');
+  const rounds = readPath(sync, 'settings/rounds') || [];
+  const roundCfg = rounds[round];
+  const selectingTeamId = readPath(sync, 'game/activeTeam');
+  const teamIds = Object.keys(readPath(sync, 'teams') || {});
+  const locks = question.locks || {};
+
+  const mayCtx = { locks, correct: null, roundCfg, selectingTeamId, teamIds, value: question.value };
+  if (!MODES[roundCfg.mode].mayAnswer(teamId, mayCtx)) {
+    return { committed: false, reason: 'not-eligible' };
+  }
+  if (roundCfg.mode === 'contest' && teamId !== selectingTeamId) {
+    const selectorChoice = locks[selectingTeamId] && locks[selectingTeamId].choice;
+    if (selectorChoice != null && choice === selectorChoice) {
+      return { committed: false, reason: 'must-differ-from-selector' };
+    }
+  }
+
+  const path = `game/question/locks/${teamId}`;
+  const { committed, snapshot } = await sync.transact(path, (cur) => (cur == null ? { playerId, choice, at: serverNow } : undefined));
+  return { committed, lock: getAtPath(snapshot, splitPath(path)) };
+}

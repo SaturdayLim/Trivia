@@ -1,0 +1,684 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stack — Question Bank Importer</title>
+<style>
+  :root {
+    --bg: #14171c;
+    --panel: #1d2129;
+    --border: #2c313c;
+    --text: #e7e9ec;
+    --muted: #9aa2b1;
+    --ok: #4caf50;
+    --bad: #e5484d;
+    --warn: #e5a83f;
+    --accent: #5b8def;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 24px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    line-height: 1.4;
+  }
+  h1 { margin: 0 0 4px; font-size: 1.4rem; }
+  h2 { margin: 28px 0 8px; font-size: 1.1rem; }
+  p.hint { color: var(--muted); margin: 0 0 20px; }
+  #dropzone {
+    border: 2px dashed var(--border);
+    border-radius: 10px;
+    padding: 36px 16px;
+    text-align: center;
+    color: var(--muted);
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s, background 0.15s;
+  }
+  #dropzone:hover, #dropzone:focus-visible, #dropzone.dragover {
+    border-color: var(--accent);
+    color: var(--text);
+    background: rgba(91, 141, 239, 0.08);
+    outline: none;
+  }
+  #fileInput { display: none; }
+  .filemeta { margin: 10px 0; color: var(--muted); font-size: 0.85rem; }
+  .section { margin: 14px 0; display: flex; align-items: center; gap: 10px; }
+  .hidden { display: none; }
+  #actions { margin: 16px 0; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  button {
+    background: var(--accent);
+    color: #0b0e13;
+    border: none;
+    border-radius: 6px;
+    padding: 9px 14px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button:disabled {
+    background: var(--border);
+    color: var(--muted);
+    cursor: not-allowed;
+  }
+  select {
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 8px;
+    font-size: 0.88rem;
+    max-width: 100%;
+  }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 0.88rem;
+    background: var(--panel);
+  }
+  .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 8px; }
+  th, td {
+    text-align: left;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  th { color: var(--muted); font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.03em; }
+  tr:last-child td { border-bottom: none; }
+  .mapping-table td:first-child { width: 180px; font-weight: 600; white-space: nowrap; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 0.78rem; font-weight: 700; }
+  .badge.pass { background: rgba(76, 175, 80, 0.15); color: var(--ok); }
+  .badge.fail { background: rgba(229, 72, 77, 0.15); color: var(--bad); }
+  .badge.warn { background: rgba(229, 168, 63, 0.15); color: var(--warn); }
+  .empty { color: var(--muted); font-style: italic; padding: 10px 2px; }
+  code { background: rgba(255,255,255,0.06); padding: 1px 5px; border-radius: 4px; }
+  .req { color: var(--bad); }
+  .stat-line { margin: 10px 0 18px; color: var(--muted); }
+  .stat-line b { color: var(--text); }
+  footer { margin-top: 36px; color: var(--muted); font-size: 0.8rem; }
+</style>
+</head>
+<body>
+  <h1>Question Bank Importer</h1>
+  <p class="hint">
+    Drop the trivia workbook (<code>.xlsx</code>) here, or click to browse. Columns auto-map from the header
+    row; remap any dropdown if a workbook differs from the expected layout. Converts to one Markdown file per
+    category (per PRD &sect;3.2, <code>Icon:</code>/<code>Color:</code> lines omitted) plus
+    <code>index.json</code>, zipped together with an import report.
+  </p>
+
+  <div id="dropzone" tabindex="0" role="button" aria-label="Drop or choose an .xlsx workbook">
+    Drop .xlsx workbook here, or click to choose a file
+  </div>
+  <input type="file" id="fileInput" accept=".xlsx,.xls">
+  <div id="fileMeta" class="filemeta"></div>
+
+  <div id="sheetRow" class="section hidden">
+    <label for="sheetSelect"><b>Sheet:</b></label>
+    <select id="sheetSelect"></select>
+    <span id="rowCountMeta" class="filemeta"></span>
+  </div>
+
+  <h2>Column Mapping</h2>
+  <p class="hint" id="mappingHint">Load a workbook to configure column mapping.</p>
+  <div class="table-wrap">
+    <table class="mapping-table">
+      <thead><tr><th>Field</th><th>Source column</th></tr></thead>
+      <tbody id="mappingBody"><tr><td class="empty" colspan="2">No file loaded yet.</td></tr></tbody>
+    </table>
+  </div>
+
+  <h2>Preview (first 5 rows)</h2>
+  <div class="table-wrap">
+    <table id="previewTable">
+      <thead><tr>
+        <th>Row</th><th>Category</th><th>Dif</th><th>Question</th><th>A</th><th>B</th><th>C</th><th>D</th>
+        <th>Ans</th><th>Fact</th><th>Status</th>
+      </tr></thead>
+      <tbody><tr><td class="empty" colspan="11">No file loaded yet.</td></tr></tbody>
+    </table>
+  </div>
+
+  <div id="actions">
+    <button id="convertBtn" disabled>Convert &amp; Download ZIP</button>
+  </div>
+  <div id="resultStat" class="stat-line"></div>
+
+  <h2>Category Summary</h2>
+  <div class="table-wrap">
+    <table id="summaryTable">
+      <thead><tr><th>Category</th><th>File</th><th>Easy</th><th>Med</th><th>Hard</th><th>Total</th></tr></thead>
+      <tbody><tr><td class="empty" colspan="6">Convert a workbook to see results.</td></tr></tbody>
+    </table>
+  </div>
+
+  <h2>Warnings</h2>
+  <div class="table-wrap">
+    <table id="warningsTable">
+      <thead><tr><th>Category</th><th>Warning</th></tr></thead>
+      <tbody><tr><td class="empty" colspan="2">No warnings.</td></tr></tbody>
+    </table>
+  </div>
+
+  <h2>Skipped Rows</h2>
+  <div class="table-wrap">
+    <table id="skippedTable">
+      <thead><tr><th>Sheet row</th><th>Reason</th></tr></thead>
+      <tbody><tr><td class="empty" colspan="2">No skipped rows.</td></tr></tbody>
+    </table>
+  </div>
+
+  <footer>
+    Markdown is produced with <code>serializeCategory()</code> from <code>js/engine/questions.js</code> — the
+    same module the app and the validator use — and every generated file is silently re-parsed with the real
+    parser before download as a correctness check (see the report's INTERNAL CHECK section).
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script type="module">
+    import { parseCategory, serializeCategory } from '../js/engine/questions.js';
+
+    const DIF_NAMES = { E: 'Easy', M: 'Med', H: 'Hard' };
+    const LETTERS = ['A', 'B', 'C', 'D'];
+
+    // Logical import fields. "exact" is checked (header trimmed+lowercased) across ALL
+    // fields before any "contains" fallback is tried, so e.g. "Category" always wins
+    // over "Subcategory" regardless of column order.
+    const FIELD_DEFS = [
+      { key: 'category',   label: 'Category',  required: true,  exact: ['category'],           contains: ['categ'] },
+      { key: 'difficulty', label: 'Difficulty', required: true,  exact: ['difficulty', 'diff'], contains: ['diffic'] },
+      { key: 'question',   label: 'Question',   required: true,  exact: ['question'],           contains: ['question'] },
+      { key: 'a',          label: 'Option A',   required: true,  exact: ['a'],                  contains: [] },
+      { key: 'b',          label: 'Option B',   required: true,  exact: ['b'],                  contains: [] },
+      { key: 'c',          label: 'Option C',   required: true,  exact: ['c'],                  contains: [] },
+      { key: 'd',          label: 'Option D',   required: true,  exact: ['d'],                  contains: [] },
+      { key: 'answer',     label: 'Answer',     required: true,  exact: ['answer'],             contains: ['answer'] },
+      { key: 'fact',       label: 'Fun Fact',   required: false, exact: ['fun fact', 'fact'],   contains: ['fact'] },
+    ];
+
+    let workbook = null;
+    let sheetNames = [];
+    let aoa = [];        // current sheet as array-of-arrays; aoa[0] = header row
+    let headerRow = [];  // raw header cell strings for current sheet
+    let mapping = {};    // field key -> column index (-1 = unmapped)
+    let sourceFileName = '';
+
+    const dropzone = document.getElementById('dropzone');
+    const fileInput = document.getElementById('fileInput');
+    const fileMeta = document.getElementById('fileMeta');
+    const sheetRow = document.getElementById('sheetRow');
+    const sheetSelect = document.getElementById('sheetSelect');
+    const rowCountMeta = document.getElementById('rowCountMeta');
+    const mappingHint = document.getElementById('mappingHint');
+    const mappingBody = document.getElementById('mappingBody');
+    const previewBody = document.querySelector('#previewTable tbody');
+    const convertBtn = document.getElementById('convertBtn');
+    const resultStat = document.getElementById('resultStat');
+    const summaryBody = document.querySelector('#summaryTable tbody');
+    const warningsBody = document.querySelector('#warningsTable tbody');
+    const skippedBody = document.querySelector('#skippedTable tbody');
+
+    dropzone.addEventListener('click', () => fileInput.click());
+    dropzone.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); }
+    });
+    dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('dragover'); });
+    dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
+    dropzone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropzone.classList.remove('dragover');
+      const f = e.dataTransfer.files && e.dataTransfer.files[0];
+      if (f) handleFile(f);
+    });
+    fileInput.addEventListener('change', () => {
+      const f = fileInput.files[0];
+      if (f) handleFile(f);
+      fileInput.value = '';
+    });
+    sheetSelect.addEventListener('change', onSheetChange);
+    convertBtn.addEventListener('click', convert);
+
+    async function handleFile(file) {
+      sourceFileName = file.name;
+      let buf;
+      try {
+        buf = await file.arrayBuffer();
+        workbook = XLSX.read(buf, { type: 'array' });
+      } catch (e) {
+        alert('Could not read this file as an Excel workbook: ' + e.message);
+        return;
+      }
+      sheetNames = workbook.SheetNames;
+      sheetSelect.innerHTML = '';
+      let bestIdx = 0;
+      let bestScore = -1;
+      sheetNames.forEach((name, idx) => {
+        const opt = document.createElement('option');
+        opt.value = String(idx);
+        opt.textContent = name;
+        sheetSelect.appendChild(opt);
+        const a = XLSX.utils.sheet_to_json(workbook.Sheets[name], { header: 1, raw: false, defval: '' });
+        const score = a.length ? scoreHeaderRow(normalizeHeader(a[0])) : 0;
+        if (score > bestScore) { bestScore = score; bestIdx = idx; }
+      });
+      sheetSelect.value = String(bestIdx);
+      sheetRow.classList.remove('hidden');
+      fileMeta.textContent = `${file.name} — ${sheetNames.length} sheet(s) found, "${sheetNames[bestIdx]}" auto-selected`;
+      onSheetChange();
+    }
+
+    function normalizeHeader(row) {
+      return row.map((h) => (h === undefined || h === null) ? '' : String(h).trim().toLowerCase());
+    }
+
+    function autoMapAll(headerNorm) {
+      const map = {};
+      FIELD_DEFS.forEach((d) => { map[d.key] = -1; });
+      FIELD_DEFS.forEach((d) => {
+        const idx = headerNorm.findIndex((h) => d.exact.includes(h));
+        if (idx >= 0) map[d.key] = idx;
+      });
+      FIELD_DEFS.forEach((d) => {
+        if (map[d.key] >= 0) return;
+        const claimed = new Set(Object.values(map).filter((v) => v >= 0));
+        const idx = headerNorm.findIndex((h, i) => !claimed.has(i) && d.contains.some((sub) => h.includes(sub)));
+        if (idx >= 0) map[d.key] = idx;
+      });
+      return map;
+    }
+
+    function scoreHeaderRow(headerNorm) {
+      const map = autoMapAll(headerNorm);
+      return FIELD_DEFS.filter((d) => d.required).reduce((n, d) => n + (map[d.key] >= 0 ? 1 : 0), 0);
+    }
+
+    function colLetter(idx) {
+      let n = idx + 1;
+      let s = '';
+      while (n > 0) { const r = (n - 1) % 26; s = String.fromCharCode(65 + r) + s; n = Math.floor((n - 1) / 26); }
+      return s;
+    }
+
+    function onSheetChange() {
+      const idx = parseInt(sheetSelect.value, 10);
+      const ws = workbook.Sheets[sheetNames[idx]];
+      aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' });
+      headerRow = aoa.length ? aoa[0].map((h) => (h === undefined || h === null) ? '' : String(h)) : [];
+      rowCountMeta.textContent = `${Math.max(aoa.length - 1, 0)} data row(s)`;
+      buildMappingUI();
+    }
+
+    function buildMappingUI() {
+      mappingHint.textContent = 'Auto-detected from column headers — change any dropdown if this workbook differs. * required.';
+      mappingBody.innerHTML = '';
+      const headerNorm = normalizeHeader(headerRow);
+      const auto = autoMapAll(headerNorm);
+      FIELD_DEFS.forEach((def) => {
+        const tr = document.createElement('tr');
+        const tdLabel = document.createElement('td');
+        tdLabel.innerHTML = `${escapeHtml(def.label)}${def.required ? ' <span class="req">*</span>' : ''}`;
+        const tdSelect = document.createElement('td');
+        const sel = document.createElement('select');
+        sel.id = `map-${def.key}`;
+        const noneOpt = document.createElement('option');
+        noneOpt.value = '-1';
+        noneOpt.textContent = def.required ? '-- select column --' : '-- none --';
+        sel.appendChild(noneOpt);
+        headerRow.forEach((h, i) => {
+          const opt = document.createElement('option');
+          opt.value = String(i);
+          opt.textContent = `${colLetter(i)}: ${h || '(blank header)'}`;
+          sel.appendChild(opt);
+        });
+        sel.value = String(auto[def.key]);
+        sel.addEventListener('change', onMappingChanged);
+        tdSelect.appendChild(sel);
+        tr.appendChild(tdLabel);
+        tr.appendChild(tdSelect);
+        mappingBody.appendChild(tr);
+      });
+      onMappingChanged();
+    }
+
+    function onMappingChanged() {
+      mapping = {};
+      FIELD_DEFS.forEach((def) => {
+        const sel = document.getElementById(`map-${def.key}`);
+        mapping[def.key] = sel ? parseInt(sel.value, 10) : -1;
+      });
+      renderPreview();
+      const complete = FIELD_DEFS.every((def) => !def.required || mapping[def.key] >= 0);
+      const hasData = aoa.length > 1;
+      convertBtn.disabled = !(complete && hasData);
+      convertBtn.title = !hasData ? 'Sheet has no data rows' : (!complete ? 'Map all required (*) fields first' : '');
+    }
+
+    // ---- row extraction / validation (mirrors the js/engine/questions.js grammar) ----
+
+    function oneLine(s) { return (s ?? '').toString().replace(/[\r\n]+/g, ' ').replace(/\s{2,}/g, ' ').trim(); }
+    function multiLine(s) { return (s ?? '').toString().replace(/\r\n?/g, '\n').trim(); }
+
+    function classifyDifficulty(rawVal) {
+      const s = (rawVal ?? '').toString().trim().toLowerCase();
+      if (!s) return null;
+      if (s.startsWith('e')) return 'E';
+      if (s.startsWith('m')) return 'M';
+      if (s.startsWith('h')) return 'H';
+      return null;
+    }
+
+    /** Legacy bank stores the Answer cell as the option's full TEXT, not a letter;
+     * accept a bare A-D letter too, in case a workbook already encodes it that way. */
+    function deriveAnswerLetter(rawVal, options) {
+      const ans = (rawVal ?? '').toString().trim();
+      if (!ans) return { error: 'missing Answer value' };
+      if (ans.length === 1 && 'ABCDabcd'.includes(ans)) return { letter: ans.toUpperCase() };
+      const exact = [];
+      options.forEach((opt, i) => { if (opt.trim() === ans) exact.push(i); });
+      if (exact.length === 1) return { letter: LETTERS[exact[0]] };
+      const ci = [];
+      options.forEach((opt, i) => { if (opt.trim().toLowerCase() === ans.toLowerCase()) ci.push(i); });
+      if (ci.length === 1) return { letter: LETTERS[ci[0]] };
+      if (exact.length > 1 || ci.length > 1) return { error: `Answer "${ans}" matches multiple options — ambiguous` };
+      return { error: `Answer "${ans}" does not match any option (A:"${options[0]}" B:"${options[1]}" C:"${options[2]}" D:"${options[3]}")` };
+    }
+
+    function slugify(name) {
+      let s = name.trim().toLowerCase().replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+      if (!s) s = 'category';
+      return s;
+    }
+
+    function extractRow(rowArr) {
+      const get = (key) => {
+        const idx = mapping[key];
+        if (idx === undefined || idx < 0) return '';
+        const v = rowArr[idx];
+        return (v === undefined || v === null) ? '' : String(v);
+      };
+      return {
+        category: oneLine(get('category')),
+        difficultyRaw: get('difficulty').trim(),
+        question: multiLine(get('question')),
+        options: ['a', 'b', 'c', 'd'].map((k) => oneLine(get(k))),
+        answerRaw: get('answer').trim(),
+        fact: multiLine(get('fact')),
+      };
+    }
+
+    function isBlankExtract(x) {
+      return !x.category && !x.difficultyRaw && !x.question && x.options.every((o) => !o) && !x.answerRaw;
+    }
+
+    function validateExtract(x) {
+      if (!x.category) return { ok: false, reason: 'missing Category' };
+      const dif = classifyDifficulty(x.difficultyRaw);
+      if (!dif) return { ok: false, reason: `unrecognized Difficulty value "${x.difficultyRaw}"` };
+      if (!x.question) return { ok: false, reason: 'missing Question' };
+      for (let i = 0; i < 4; i++) if (!x.options[i]) return { ok: false, reason: `missing Option ${LETTERS[i]}` };
+      const ans = deriveAnswerLetter(x.answerRaw, x.options);
+      if (ans.error) return { ok: false, reason: ans.error };
+      return { ok: true, dif, letter: ans.letter };
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, (c) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+      }[c]));
+    }
+
+    function renderPreview() {
+      previewBody.innerHTML = '';
+      const rows = aoa.slice(1, 6);
+      if (rows.length === 0) {
+        previewBody.innerHTML = '<tr><td class="empty" colspan="11">No data rows to preview.</td></tr>';
+        return;
+      }
+      rows.forEach((r, i) => {
+        const excelRow = i + 2;
+        const x = extractRow(r);
+        let statusHtml;
+        let letter = '—';
+        if (isBlankExtract(x)) {
+          statusHtml = '<span class="badge warn">blank row</span>';
+        } else {
+          const v = validateExtract(x);
+          if (v.ok) { statusHtml = '<span class="badge pass">OK</span>'; letter = v.letter; }
+          else statusHtml = `<span class="badge fail">${escapeHtml(v.reason)}</span>`;
+        }
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${excelRow}</td><td>${escapeHtml(x.category)}</td><td>${escapeHtml(x.difficultyRaw)}</td>` +
+          `<td>${escapeHtml(x.question)}</td><td>${escapeHtml(x.options[0])}</td><td>${escapeHtml(x.options[1])}</td>` +
+          `<td>${escapeHtml(x.options[2])}</td><td>${escapeHtml(x.options[3])}</td><td>${letter}</td>` +
+          `<td>${escapeHtml(x.fact)}</td><td>${statusHtml}</td>`;
+        previewBody.appendChild(tr);
+      });
+    }
+
+    // ---- conversion ----
+
+    function processWorkbook() {
+      const categories = new Map(); // normalized category name -> {name, E:[], M:[], H:[]}
+      const skipped = [];
+      const dataRows = aoa.slice(1);
+      let blankCount = 0;
+
+      dataRows.forEach((r, i) => {
+        const excelRow = i + 2;
+        const x = extractRow(r);
+        if (isBlankExtract(x)) { blankCount++; return; }
+
+        // Register the category even when this particular row is invalid, so a
+        // category that ends up with zero valid questions is still emitted
+        // (per spec) rather than silently vanishing.
+        let catEntry = null;
+        if (x.category) {
+          const key = x.category.toLowerCase();
+          if (!categories.has(key)) categories.set(key, { name: x.category, E: [], M: [], H: [] });
+          catEntry = categories.get(key);
+        }
+
+        const v = validateExtract(x);
+        if (!v.ok) { skipped.push({ row: excelRow, reason: v.reason }); return; }
+        catEntry[v.dif].push({ q: x.question, options: x.options.slice(), answer: v.letter, fact: x.fact });
+      });
+
+      const usedSlugs = new Map();
+      const files = new Map();
+      const categorySummaries = [];
+      const warnings = [];
+      const internalWarnings = [];
+
+      for (const [, entry] of categories) {
+        const base = slugify(entry.name);
+        let slug = base;
+        let n = 2;
+        while (usedSlugs.has(slug)) { slug = `${base}-${n}`; n++; }
+        usedSlugs.set(slug, entry.name);
+
+        const questions = [];
+        ['E', 'M', 'H'].forEach((dif) => {
+          entry[dif].forEach((qd, idx) => {
+            questions.push({ id: `${dif}${idx + 1}`, dif, q: qd.q, options: qd.options, answer: qd.answer, fact: qd.fact });
+          });
+        });
+
+        const catWarnings = [];
+        ['E', 'M', 'H'].forEach((dif) => {
+          if (entry[dif].length === 0) {
+            const msg = `0 ${DIF_NAMES[dif]} questions (game requires ≥ 1 per difficulty)`;
+            catWarnings.push(msg);
+            warnings.push({ category: entry.name, message: msg });
+          }
+        });
+
+        const md = serializeCategory({ category: { slug, name: entry.name, icon: null, color: null }, questions });
+        files.set(`${slug}.md`, md);
+
+        // Safety net: re-parse our own output with the real shared engine.
+        // "...questions found" errors are the EXPECTED shape of the "emit
+        // anyway with a warning" rule (already captured above as `warnings`);
+        // anything else means this file has a real bug and needs attention.
+        const chk = parseCategory(md, `${slug}.md`);
+        const unexpected = chk.errors.filter((e) => !/questions found/.test(e.msg));
+        unexpected.forEach((e) => internalWarnings.push(`${slug}.md line ${e.line}: ${e.msg}`));
+
+        categorySummaries.push({
+          name: entry.name,
+          slug,
+          counts: { E: entry.E.length, M: entry.M.length, H: entry.H.length },
+          total: questions.length,
+          warnings: catWarnings,
+        });
+      }
+
+      const filenames = Array.from(files.keys()).sort();
+      const indexJson = JSON.stringify(filenames);
+      const sheetName = sheetNames[parseInt(sheetSelect.value, 10)];
+
+      const report = buildReport({
+        sourceFileName,
+        sheetName,
+        totalRows: dataRows.length,
+        blankCount,
+        skippedCount: skipped.length,
+        importedCount: dataRows.length - blankCount - skipped.length,
+        skipped,
+        categorySummaries,
+        warnings,
+        internalWarnings,
+        filenames,
+      });
+
+      return {
+        files, indexJson, filenames, report, skipped, categorySummaries, warnings, internalWarnings,
+        blankCount, totalRows: dataRows.length,
+      };
+    }
+
+    function buildReport(ctx) {
+      const lines = [];
+      lines.push('STACK QUESTION BANK IMPORT REPORT');
+      lines.push(`Generated: ${new Date().toISOString()}`);
+      lines.push(`Source file: ${ctx.sourceFileName}`);
+      lines.push(`Sheet used: ${ctx.sheetName}`);
+      lines.push('');
+      lines.push(`Rows in sheet (excl. header): ${ctx.totalRows}`);
+      lines.push(`Blank rows (silently ignored): ${ctx.blankCount}`);
+      lines.push(`Rows imported: ${ctx.importedCount}`);
+      lines.push(`Rows skipped (errors): ${ctx.skippedCount}`);
+      lines.push(`Categories emitted: ${ctx.categorySummaries.length}`);
+      lines.push('');
+      lines.push('=== CATEGORY SUMMARY (Easy / Med / Hard / Total) ===');
+      ctx.categorySummaries.forEach((c) => {
+        const w = c.warnings.length ? `  [WARNING: ${c.warnings.join('; ')}]` : '';
+        lines.push(`${c.name}  ->  questions/${c.slug}.md   E:${c.counts.E}  M:${c.counts.M}  H:${c.counts.H}  Total:${c.total}${w}`);
+      });
+      lines.push('');
+      lines.push('=== WARNINGS ===');
+      if (ctx.warnings.length === 0) lines.push('(none)');
+      else ctx.warnings.forEach((w) => lines.push(`${w.category}: ${w.message}`));
+      lines.push('');
+      lines.push('=== SKIPPED ROWS ===');
+      if (ctx.skipped.length === 0) lines.push('(none)');
+      else ctx.skipped.forEach((s) => lines.push(`Row ${s.row}: ${s.reason}`));
+      lines.push('');
+      lines.push('=== INTERNAL CHECK (generated files re-parsed with js/engine/questions.js; should be empty) ===');
+      if (ctx.internalWarnings.length === 0) lines.push('(none)');
+      else ctx.internalWarnings.forEach((w) => lines.push(w));
+      lines.push('');
+      lines.push('=== FILES EMITTED ===');
+      ctx.filenames.forEach((f) => lines.push(`questions/${f}`));
+      lines.push('questions/index.json');
+      lines.push('');
+      return lines.join('\n');
+    }
+
+    async function convert() {
+      convertBtn.disabled = true;
+      const prevLabel = convertBtn.textContent;
+      convertBtn.textContent = 'Converting…';
+      try {
+        const result = processWorkbook();
+        await downloadZip(result);
+        renderResults(result);
+      } catch (err) {
+        console.error(err);
+        alert('Conversion failed: ' + err.message);
+      } finally {
+        convertBtn.textContent = prevLabel;
+        onMappingChanged(); // restores correct enabled/disabled state
+      }
+    }
+
+    async function downloadZip(result) {
+      const zip = new JSZip();
+      const qFolder = zip.folder('questions');
+      for (const [filename, content] of result.files) qFolder.file(filename, content);
+      qFolder.file('index.json', result.indexJson);
+      zip.file('report.txt', result.report);
+      const blob = await zip.generateAsync({ type: 'blob' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'stack-questions.zip';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+    }
+
+    function renderResults(result) {
+      const warnCount = result.warnings.length;
+      const internalCount = result.internalWarnings.length;
+      resultStat.innerHTML = `<b>${result.totalRows}</b> rows processed &mdash; ` +
+        `<b>${result.totalRows - result.blankCount - result.skipped.length}</b> imported, ` +
+        `<b>${result.skipped.length}</b> skipped, <b>${result.blankCount}</b> blank. ` +
+        `<b>${result.categorySummaries.length}</b> categories emitted (<b>${warnCount}</b> warning(s)` +
+        `${internalCount ? `, <b>${internalCount}</b> INTERNAL — see report.txt` : ''}). ` +
+        `Downloaded <code>stack-questions.zip</code>.`;
+
+      summaryBody.innerHTML = '';
+      if (result.categorySummaries.length === 0) {
+        summaryBody.innerHTML = '<tr><td class="empty" colspan="6">No categories found.</td></tr>';
+      } else {
+        result.categorySummaries.forEach((c) => {
+          const tr = document.createElement('tr');
+          const warnBadge = c.warnings.length
+            ? ` <span class="badge warn" title="${escapeHtml(c.warnings.join('; '))}">warn</span>`
+            : '';
+          tr.innerHTML = `<td>${escapeHtml(c.name)}${warnBadge}</td><td><code>${escapeHtml(c.slug)}.md</code></td>` +
+            `<td>${c.counts.E}</td><td>${c.counts.M}</td><td>${c.counts.H}</td><td>${c.total}</td>`;
+          summaryBody.appendChild(tr);
+        });
+      }
+
+      warningsBody.innerHTML = '';
+      if (result.warnings.length === 0) {
+        warningsBody.innerHTML = '<tr><td class="empty" colspan="2">No warnings.</td></tr>';
+      } else {
+        result.warnings.forEach((w) => {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `<td>${escapeHtml(w.category)}</td><td>${escapeHtml(w.message)}</td>`;
+          warningsBody.appendChild(tr);
+        });
+      }
+
+      skippedBody.innerHTML = '';
+      if (result.skipped.length === 0) {
+        skippedBody.innerHTML = '<tr><td class="empty" colspan="2">No skipped rows.</td></tr>';
+      } else {
+        result.skipped.forEach((s) => {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `<td>${s.row}</td><td>${escapeHtml(s.reason)}</td>`;
+          skippedBody.appendChild(tr);
+        });
+      }
+    }
+  </script>
+</body>
+</html>

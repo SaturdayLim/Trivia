@@ -1,0 +1,254 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Stack engine test harness</title>
+<style>
+  body { font: 14px/1.45 system-ui, sans-serif; margin: 1.5rem; max-width: 960px; }
+  p.note { color: #555; }
+  table { border-collapse: collapse; width: 100%; margin-top: .5rem; }
+  th, td { text-align: left; padding: .3rem .6rem; border-bottom: 1px solid #ddd; vertical-align: top; }
+  th { position: sticky; top: 0; background: #fff; }
+  tr.fail { background: #fff4f4; }
+  td.status { font-weight: 700; width: 3.5rem; }
+  tr.pass td.status { color: #0a7a0a; }
+  tr.fail td.status { color: #b00020; }
+  td.suite { width: 6rem; color: #666; font: 12px/1.4 monospace; }
+  td.detail { font: 12px/1.4 monospace; color: #b00020; }
+  #summary { font-weight: 700; margin-top: 1rem; padding: .5rem .8rem; display: inline-block; }
+  #summary.ok { color: #0a7a0a; background: #eafaea; }
+  #summary.bad { color: #b00020; background: #fdeaea; }
+</style>
+
+<h1>Stack engine test harness</h1>
+<p class="note">
+  Runs the pure-function fixtures (scoring / scheduler / board) directly against the real
+  modules in <code>js/engine/</code>, in the browser. Mirrors the coverage validated in the
+  Node suite (scoring matrix, scheduler ordering/advance, board draw/exhaustion) — see
+  <code>js/engine/actions.js</code>'s header for why the sync-driven mini-game simulation
+  stays Node-only (it needs a driver session, not a DOM).
+</p>
+
+<div id="summary">running…</div>
+<table>
+  <thead><tr><th>Status</th><th>Suite</th><th>Case</th><th>Detail</th></tr></thead>
+  <tbody id="rows"></tbody>
+</table>
+
+<script type="module">
+  import { questionValue, penaltyAmount, MODES, DEFAULT_ROUNDS } from '../js/engine/scoring.js';
+  import { computeOrder, advanceTurn } from '../js/engine/scheduler.js';
+  import { buildBoard, drawQuestion, tierEmpty, categoryEmpty, boardEmpty } from '../js/engine/board.js';
+
+  // --- tiny assertion helpers (no deps) --------------------------------
+  function stableStringify(value) {
+    if (value === null || typeof value !== 'object') return JSON.stringify(value);
+    if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+    const keys = Object.keys(value).sort();
+    return `{${keys.map((k) => `${JSON.stringify(k)}:${stableStringify(value[k])}`).join(',')}}`;
+  }
+  function assertEqual(actual, expected, msg) {
+    if (stableStringify(actual) !== stableStringify(expected)) {
+      throw new Error(`${msg ? msg + ': ' : ''}expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
+    }
+  }
+  function assert(cond, msg) {
+    if (!cond) throw new Error(msg || 'assertion failed');
+  }
+
+  // -----------------------------------------------------------------------
+  // FIXTURES — one exported array, so this page stays in sync with the Node
+  // suite (scratchpad engine-tests/{scoring,scheduler,board}.test.mjs) that
+  // validated this same engine code. Each entry: {suite, name, fn}; fn
+  // throws on failure. actions.js's sync-driven mini-game sim is Node-only
+  // (needs a driver session object, not a DOM) and is intentionally omitted.
+  // -----------------------------------------------------------------------
+  const FIXTURES = [];
+  function addFixture(suite, name, fn) {
+    FIXTURES.push({ suite, name, fn });
+  }
+
+  // --- scoring ------------------------------------------------------------
+  addFixture('scoring', 'questionValue E/M/H bases x multiplier', () => {
+    assertEqual(questionValue('E', { multiplier: 1 }), 1);
+    assertEqual(questionValue('M', { multiplier: 1 }), 2);
+    assertEqual(questionValue('H', { multiplier: 1 }), 3);
+    assertEqual(questionValue('H', { multiplier: 2 }), 6);
+  });
+  addFixture('scoring', 'penaltyAmount on/half/off', () => {
+    assertEqual(penaltyAmount(3, 'on'), 3);
+    assertEqual(penaltyAmount(3, 'half'), 2);
+    assertEqual(penaltyAmount(4, 'half'), 2);
+    assertEqual(penaltyAmount(3, 'off'), 0);
+  });
+  addFixture('scoring', 'DEFAULT_ROUNDS: 4 v6 stages in order', () => {
+    assertEqual(DEFAULT_ROUNDS.map((r) => r.mode), ['community', 'exclusive', 'contest', 'suddendeath']);
+  });
+  addFixture('scoring', 'DEFAULT_ROUNDS: per-stage defaults (PRD §4.2)', () => {
+    assertEqual(DEFAULT_ROUNDS[0], { mode: 'community', rotations: 3, multiplier: 1, penalty: 'off', orderMode: 'registration', timerSec: 0 });
+    assertEqual(DEFAULT_ROUNDS[1], { mode: 'exclusive', rotations: 3, multiplier: 1, penalty: 'on', orderMode: 'winnerFirst', timerSec: 0 });
+    assertEqual(DEFAULT_ROUNDS[2].mode, 'contest');
+    assertEqual(DEFAULT_ROUNDS[2].rotations, 1);
+    assertEqual(DEFAULT_ROUNDS[2].orderMode, 'loserFirst');
+    assertEqual(DEFAULT_ROUNDS[3], { mode: 'suddendeath', rotations: 1, multiplier: 2, penalty: 'on', orderMode: 'loserFirst', timerSec: 0 });
+  });
+  addFixture('scoring', 'mayAnswer: community/suddendeath all-true, exclusive selector-only', () => {
+    for (const id of ['t1', 't2', 't3']) {
+      assert(MODES.community.mayAnswer(id, {}) === true);
+      assert(MODES.suddendeath.mayAnswer(id, {}) === true);
+    }
+    assert(MODES.exclusive.mayAnswer('t1', { selectingTeamId: 't1' }) === true);
+    assert(MODES.exclusive.mayAnswer('t2', { selectingTeamId: 't1' }) === false);
+  });
+  addFixture('scoring', 'mayAnswer: contest gating (selector always, contestor after public lock)', () => {
+    assert(MODES.contest.mayAnswer('t1', { selectingTeamId: 't1', locks: {} }) === true);
+    assert(MODES.contest.mayAnswer('t2', { selectingTeamId: 't1', locks: {} }) === false);
+    assert(MODES.contest.mayAnswer('t2', { selectingTeamId: 't1', locks: { t1: { choice: 'A' } } }) === true);
+  });
+
+  const teamIds = ['t1', 't2', 't3'];
+  const value = 4; // ceil(4/2)=2: distinct from both 0 and 4, exercises 'half' meaningfully
+  for (const penalty of ['on', 'half', 'off']) {
+    const expectedPenalty = penalty === 'on' ? -value : penalty === 'half' ? -Math.ceil(value / 2) : 0;
+
+    addFixture('scoring', `community correct/wrong/nolock, penalty=${penalty}`, () => {
+      const roundCfg = { mode: 'community', multiplier: 1, penalty };
+      assertEqual(MODES.community.scoreOutcome({ locks: { t1: { choice: 'A' } }, correct: 'A', roundCfg, selectingTeamId: 't1', teamIds, value }).deltas, { t1: value, t2: 0, t3: 0 });
+      assertEqual(MODES.community.scoreOutcome({ locks: { t1: { choice: 'B' } }, correct: 'A', roundCfg, selectingTeamId: 't1', teamIds, value }).deltas, { t1: expectedPenalty, t2: 0, t3: 0 });
+      assertEqual(MODES.community.scoreOutcome({ locks: {}, correct: 'A', roundCfg, selectingTeamId: 't1', teamIds, value }).deltas, { t1: 0, t2: 0, t3: 0 });
+      assertEqual(MODES.community.scoreOutcome({ locks: { t1: { choice: 'A' }, t2: { choice: 'B' } }, correct: 'A', roundCfg, selectingTeamId: 't1', teamIds, value }).deltas, { t1: value, t2: expectedPenalty, t3: 0 });
+    });
+
+    addFixture('scoring', `suddendeath x2 correct/wrong/nolock, penalty=${penalty}`, () => {
+      const roundCfg = { mode: 'suddendeath', multiplier: 2, penalty };
+      const valueSD = questionValue('H', roundCfg);
+      assertEqual(valueSD, 6);
+      assertEqual(MODES.suddendeath.scoreOutcome({ locks: { t1: { choice: 'A' } }, correct: 'A', roundCfg, selectingTeamId: 't1', teamIds, value: valueSD }).deltas, { t1: valueSD, t2: 0, t3: 0 });
+      const expectedSD = penalty === 'on' ? -valueSD : penalty === 'half' ? -Math.ceil(valueSD / 2) : 0;
+      assertEqual(MODES.suddendeath.scoreOutcome({ locks: { t1: { choice: 'B' } }, correct: 'A', roundCfg, selectingTeamId: 't1', teamIds, value: valueSD }).deltas, { t1: expectedSD, t2: 0, t3: 0 });
+      assertEqual(MODES.suddendeath.scoreOutcome({ locks: {}, correct: 'A', roundCfg, selectingTeamId: 't1', teamIds, value: valueSD }).deltas, { t1: 0, t2: 0, t3: 0 });
+    });
+
+    addFixture('scoring', `exclusive correct/wrong/nolock, penalty=${penalty}`, () => {
+      const roundCfg = { mode: 'exclusive', multiplier: 1, penalty };
+      assertEqual(MODES.exclusive.scoreOutcome({ locks: { t1: { choice: 'A' } }, correct: 'A', roundCfg, selectingTeamId: 't1', teamIds, value }).deltas, { t1: value, t2: 0, t3: 0 });
+      assertEqual(MODES.exclusive.scoreOutcome({ locks: { t1: { choice: 'B' } }, correct: 'A', roundCfg, selectingTeamId: 't1', teamIds, value }).deltas, { t1: expectedPenalty, t2: 0, t3: 0 });
+      assertEqual(MODES.exclusive.scoreOutcome({ locks: {}, correct: 'A', roundCfg, selectingTeamId: 't1', teamIds, value }).deltas, { t1: 0, t2: 0, t3: 0 });
+      assertEqual(MODES.exclusive.scoreOutcome({ locks: { t1: { choice: 'A' }, t2: { choice: 'A' } }, correct: 'A', roundCfg, selectingTeamId: 't1', teamIds, value }).deltas, { t1: value, t2: 0, t3: 0 });
+    });
+
+    addFixture('scoring', `contest selector-exemption + contestor symmetry, penalty=${penalty}`, () => {
+      const roundCfg = { mode: 'contest', multiplier: 1, penalty };
+      assertEqual(MODES.contest.scoreOutcome({ locks: { t1: { choice: 'A' } }, correct: 'A', roundCfg, selectingTeamId: 't1', teamIds, value }).deltas, { t1: value, t2: 0, t3: 0 });
+      assertEqual(MODES.contest.scoreOutcome({ locks: { t1: { choice: 'B' } }, correct: 'A', roundCfg, selectingTeamId: 't1', teamIds, value }).deltas, { t1: 0, t2: 0, t3: 0 }); // wrong selector = 0, never penalized
+      assertEqual(MODES.contest.scoreOutcome({ locks: {}, correct: 'A', roundCfg, selectingTeamId: 't1', teamIds, value }).deltas, { t1: 0, t2: 0, t3: 0 });
+      assertEqual(
+        MODES.contest.scoreOutcome({ locks: { t1: { choice: 'A' }, t2: { choice: 'A' }, t3: { choice: 'B' } }, correct: 'A', roundCfg, selectingTeamId: 't1', teamIds, value }).deltas,
+        { t1: value, t2: value, t3: -value }
+      );
+    });
+  }
+
+  // --- scheduler ------------------------------------------------------------
+  addFixture('scheduler', 'computeOrder registration/winnerFirst/loserFirst with ties by registration order', () => {
+    assertEqual(computeOrder({ teams: { a: { order: 2, score: 0 }, b: { order: 0, score: 0 }, c: { order: 1, score: 0 } }, mode: 'registration' }), ['b', 'c', 'a']);
+    assertEqual(computeOrder({ teams: { a: { order: 0, score: 5 }, b: { order: 1, score: 10 }, c: { order: 2, score: 5 } }, mode: 'winnerFirst' }), ['b', 'a', 'c']);
+    assertEqual(computeOrder({ teams: { a: { order: 0, score: 5 }, b: { order: 1, score: -3 }, c: { order: 2, score: 5 } }, mode: 'loserFirst' }), ['b', 'a', 'c']);
+  });
+  addFixture('scheduler', 'advanceTurn mid-rotation just advances turnIdx', () => {
+    const game = { round: 0, rotation: 0, turnIdx: 0, teamOrder: ['t1', 't2', 't3'], teams: { t1: { order: 0, score: 0 }, t2: { order: 1, score: 0 }, t3: { order: 2, score: 0 } } };
+    const settings = { rounds: [{ rotations: 3, orderMode: 'registration' }], orderRecalc: 'perRound' };
+    assertEqual(advanceTurn(game, settings), { round: 0, rotation: 0, turnIdx: 1, teamOrder: ['t1', 't2', 't3'], activeTeam: 't2', phase: 'tapIn' });
+  });
+  addFixture('scheduler', 'advanceTurn rotation boundary: perRound holds order, perRotation recomputes', () => {
+    const game = { round: 0, rotation: 0, turnIdx: 2, teamOrder: ['t1', 't2', 't3'], teams: { t1: { order: 0, score: 10 }, t2: { order: 1, score: 0 }, t3: { order: 2, score: 5 } } };
+    const heldSettings = { rounds: [{ rotations: 3, orderMode: 'winnerFirst' }], orderRecalc: 'perRound' };
+    assertEqual(advanceTurn(game, heldSettings), { round: 0, rotation: 1, turnIdx: 0, teamOrder: ['t1', 't2', 't3'], activeTeam: 't1', phase: 'tapIn' });
+    const recalcSettings = { rounds: [{ rotations: 3, orderMode: 'winnerFirst' }], orderRecalc: 'perRotation' };
+    assertEqual(advanceTurn(game, recalcSettings), { round: 0, rotation: 1, turnIdx: 0, teamOrder: ['t1', 't3', 't2'], activeTeam: 't1', phase: 'tapIn' });
+  });
+  addFixture('scheduler', 'advanceTurn round end recomputes by the NEW round orderMode; past last round freezes at gameEnd', () => {
+    const game = { round: 0, rotation: 2, turnIdx: 2, teamOrder: ['t1', 't2', 't3'], teams: { t1: { order: 0, score: 10 }, t2: { order: 1, score: 0 }, t3: { order: 2, score: 5 } } };
+    const settings = { rounds: [{ rotations: 3, orderMode: 'registration' }, { rotations: 3, orderMode: 'loserFirst' }], orderRecalc: 'perRound' };
+    assertEqual(advanceTurn(game, settings), { round: 1, rotation: 0, turnIdx: 0, teamOrder: ['t2', 't3', 't1'], activeTeam: 't2', phase: 'roundEnd' });
+
+    const lastGame = { round: 1, rotation: 0, turnIdx: 2, teamOrder: ['t1', 't2', 't3'], teams: { t1: { order: 0, score: 1 }, t2: { order: 1, score: 2 }, t3: { order: 2, score: 3 } } };
+    const lastSettings = { rounds: [{ rotations: 3, orderMode: 'registration' }, { rotations: 1, orderMode: 'loserFirst' }], orderRecalc: 'perRound' };
+    assertEqual(advanceTurn(lastGame, lastSettings), { round: 1, rotation: 0, turnIdx: 2, teamOrder: ['t1', 't2', 't3'], activeTeam: null, phase: 'gameEnd' });
+  });
+  addFixture('scheduler', '2-round fixture: perRotation recalc walk (registration round is a no-op reorder; winnerFirst round is not)', () => {
+    const settings = { rounds: [{ rotations: 2, orderMode: 'registration' }, { rotations: 2, orderMode: 'winnerFirst' }], orderRecalc: 'perRotation' };
+    let next = advanceTurn({ round: 0, rotation: 0, turnIdx: 0, teamOrder: ['t1', 't2'], teams: { t1: { order: 0, score: 0 }, t2: { order: 1, score: 0 } } }, settings);
+    assertEqual(next, { round: 0, rotation: 0, turnIdx: 1, teamOrder: ['t1', 't2'], activeTeam: 't2', phase: 'tapIn' });
+    next = advanceTurn({ round: 0, rotation: 0, turnIdx: 1, teamOrder: ['t1', 't2'], teams: { t1: { order: 0, score: 0 }, t2: { order: 1, score: 5 } } }, settings);
+    assertEqual(next, { round: 0, rotation: 1, turnIdx: 0, teamOrder: ['t1', 't2'], activeTeam: 't1', phase: 'tapIn' });
+    next = advanceTurn({ round: 0, rotation: 1, turnIdx: 1, teamOrder: ['t1', 't2'], teams: { t1: { order: 0, score: 8 }, t2: { order: 1, score: 20 } } }, settings);
+    assertEqual(next, { round: 1, rotation: 0, turnIdx: 0, teamOrder: ['t2', 't1'], activeTeam: 't2', phase: 'roundEnd' });
+  });
+
+  // --- board ------------------------------------------------------------
+  const categories = [
+    { slug: 'cat-a', questions: [{ id: 'E1', dif: 'E' }, { id: 'E2', dif: 'E' }, { id: 'E3', dif: 'E' }, { id: 'M1', dif: 'M' }, { id: 'M2', dif: 'M' }, { id: 'H1', dif: 'H' }] },
+    { slug: 'cat-b', questions: [{ id: 'E1', dif: 'E' }, { id: 'E2', dif: 'E' }, { id: 'M1', dif: 'M' }, { id: 'M2', dif: 'M' }, { id: 'M3', dif: 'M' }, { id: 'M4', dif: 'M' }, { id: 'H1', dif: 'H' }, { id: 'H2', dif: 'H' }] },
+  ];
+  addFixture('board', 'buildBoard draws min(tierSize, available) per difficulty, only wanted slugs', () => {
+    const { board, drawn } = buildBoard({ categories, settings: { categories: ['cat-a', 'cat-b'], tierSize: 4, excludeUsed: false } });
+    assertEqual(board['cat-a'].E.length, 3);
+    assertEqual(board['cat-a'].M.length, 2);
+    assertEqual(board['cat-a'].H.length, 1);
+    assertEqual(board['cat-b'].M.length, 4);
+    assertEqual(drawn.length, 3 + 2 + 1 + 2 + 4 + 2);
+    const { board: onlyA } = buildBoard({ categories, settings: { categories: ['cat-a'], tierSize: 4, excludeUsed: false } });
+    assert('cat-a' in onlyA && !('cat-b' in onlyA));
+  });
+  addFixture('board', 'buildBoard excludeUsed filters usedRefs from the pool (and excludeUsed=false ignores them)', () => {
+    const { board: excluded } = buildBoard({ categories, settings: { categories: ['cat-a'], tierSize: 4, excludeUsed: true }, usedRefs: ['cat-a:E1', 'cat-a:E2'] });
+    assertEqual(excluded['cat-a'].E, ['E3']);
+    const { board: included } = buildBoard({ categories, settings: { categories: ['cat-a'], tierSize: 4, excludeUsed: false }, usedRefs: ['cat-a:E1', 'cat-a:E2'] });
+    assertEqual(included['cat-a'].E.length, 3);
+  });
+  addFixture('board', 'drawQuestion removes the indexed member immutably; empty tier returns null ref', () => {
+    const board = { 'cat-a': { E: ['E1', 'E2', 'E3'], M: [], H: [] } };
+    const r1 = drawQuestion(board, 'cat-a', 'E', () => 0);
+    assertEqual(r1.ref, 'cat-a:E1');
+    assertEqual(r1.board['cat-a'].E, ['E2', 'E3']);
+    assertEqual(board['cat-a'].E, ['E1', 'E2', 'E3']); // original untouched
+    const r2 = drawQuestion(board, 'cat-a', 'E', () => 0.999999);
+    assertEqual(r2.ref, 'cat-a:E3');
+    const empty = drawQuestion({ 'cat-a': { E: [], M: [], H: [] } }, 'cat-a', 'E');
+    assertEqual(empty.ref, null);
+  });
+  addFixture('board', 'tierEmpty / categoryEmpty / boardEmpty, and full exhaustion via drawQuestion', () => {
+    const board = { 'cat-a': { E: [], M: ['M1'], H: [] }, 'cat-b': { E: [], M: [], H: [] } };
+    assert(tierEmpty(board, 'cat-a', 'E') === true && tierEmpty(board, 'cat-a', 'M') === false);
+    assert(categoryEmpty(board, 'cat-a') === false && categoryEmpty(board, 'cat-b') === true);
+    assert(boardEmpty(board) === false);
+    assert(boardEmpty({ 'cat-a': { E: [], M: [], H: [] } }) === true);
+    const r1 = drawQuestion({ 'cat-a': { E: ['E1', 'E2'], M: [], H: [] } }, 'cat-a', 'E', () => 0);
+    const r2 = drawQuestion(r1.board, 'cat-a', 'E', () => 0);
+    assert(tierEmpty(r2.board, 'cat-a', 'E') === true);
+  });
+
+  export { FIXTURES };
+
+  // --- run + render ---------------------------------------------------------
+  const rowsEl = document.getElementById('rows');
+  const summaryEl = document.getElementById('summary');
+  let pass = 0;
+  let fail = 0;
+  for (const { suite, name, fn } of FIXTURES) {
+    const tr = document.createElement('tr');
+    let ok = true;
+    let detail = '';
+    try {
+      fn();
+    } catch (e) {
+      ok = false;
+      detail = e.message;
+    }
+    ok ? pass++ : fail++;
+    tr.className = ok ? 'pass' : 'fail';
+    tr.innerHTML = `<td class="status">${ok ? 'PASS' : 'FAIL'}</td><td class="suite">${suite}</td><td>${name}</td><td class="detail">${detail}</td>`;
+    rowsEl.appendChild(tr);
+  }
+  summaryEl.textContent = `${pass} passed, ${fail} failed (${FIXTURES.length} fixtures)`;
+  summaryEl.className = fail === 0 ? 'ok' : 'bad';
+</script>
