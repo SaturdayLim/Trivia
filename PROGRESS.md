@@ -4,7 +4,43 @@ Objective: web-app version of the Stack trivia game. Static frontend (GitHub Pag
 Firebase Spark realtime sync behind a swappable adapter. Roles: Player / GM / Display.
 Questions live as one Markdown file per category in this repo.
 
-## Status: PHASE 2 — UI build in flight (engine + content + sync + importer done 2026-07-03)
+## Status: BUILD COMPLETE (2026-07-03) — pending user: click-through, Firebase config, GitHub deploy
+
+## Acceptance criteria (PRD §7) verdicts
+| # | Criterion | Verdict |
+|---|---|---|
+| 1 | Zero-build static serve | PASS — full import graph + assets 200 over local HTTP |
+| 2 | Multi-tab mock game | Mechanics PASS headless (tests/full-game.test.mjs); browser click-through pending user (checklist in tools/sync-test.html + below) |
+| 3 | Registration flows | Built; create/join actions engine-tested; UI click pending |
+| 4 | Settings take effect | PASS — 4-mode game driven by round config; updateRoundSettings guard tested |
+| 5 | Tap-in exactly-one-winner | PASS on mock (same-tick race + atomic gate); Firebase live test = task 10 |
+| 6 | Turn order modes | PASS — winnerFirst/loserFirst/ties/recalc fixtures |
+| 7 | Locks earliest-per-team, selector lock public | PASS |
+| 8 | Mode matrix (community/exclusive/contest/suddendeath) | PASS |
+| 9 | Contest: contrasting pick, selector exempt, ±full | PASS |
+| 10 | Scoring value×multiplier, penalty on/half/off | PASS (full matrix) |
+| 11 | Answer/fact never on wire pre-reveal | PASS by design + UI grep audit |
+| 12 | GM delta override, adjust, skip | PASS (commitScores(edited), adjustScore, skip returns ref) |
+| 13 | Exhaustion: tier disable, category hide, end prompt | PASS engine; UI built |
+| 14 | Used-question memory + exclude + reset | PASS + one-tap v6 legacy import wired |
+| 15 | Refresh resume | Built (identity restore, GM serializer recovery, settings hydration); click pending |
+| 16 | Timer expiry locks, unanswered 0 | PASS (auto lockQuestion + scoring) |
+| 17 | Importer on real bank | PASS — executed: 60 categories, 0 parse errors |
+| 18 | Firebase cross-device | BLOCKED on user (tasks 10/11) |
+
+## Bugs found & fixed in integration
+- advance() left the scored question in state → requestSelection deadlocked every
+  game after question 1 (stale-detector masked it visually). Fixed: advance clears it.
+- claimTapIn gate check wasn't atomic with the claim (stale-gate win possible). Fixed.
+- GM delta edits were wiped by 2s presence rerenders. Fixed (edits keyed by question).
+- Serializer duplicate-request redelivery could double-apply writes. Fixed (requestId dedup).
+
+## Follow-ups (non-blocking)
+- QR-code join (deferred; room code + URL shown). Vendored QR lib if wanted.
+- 6 archive rows skipped for answer-text bugs → questions/import-report.txt.
+- Icon/Color lines absent on imported categories; "Categories & Icons" sheet in the
+  bank has icon keywords that could be mapped to assets/icons later.
+- claude-mem plugin worker was unreachable all session (hook noise only; no build impact).
 
 ## Done so far (all committed)
 - Parser/validator + sample + 3 demo categories (T3) — node round-trip verified

@@ -296,6 +296,10 @@ export async function advance(sync, role) {
 
   const next = advanceTurn({ round, rotation, turnIdx, teamOrder, teams }, { rounds, orderRecalc });
 
+  // The finished (scored) question must not linger: requestSelection guards
+  // on game/question, so leaving it set would deadlock the next selector.
+  await sync.update('game/question', null);
+
   if (next.phase === 'gameEnd') {
     await sync.update('meta/status', 'ended');
     return next;
@@ -308,6 +312,71 @@ export async function advance(sync, role) {
   await sync.update('game/activeTeam', next.activeTeam);
   await openTapIn(sync, role, next.activeTeam);
   return next;
+}
+
+/**
+ * GM: arbitrary score correction/bonus for one team (PRD §4.6, mirrors the
+ * v6 bonus column). Applied immediately, independent of any question.
+ * @returns {Promise<?{teamId: string, delta: number}>}
+ */
+export async function adjustScore(sync, role, teamId, delta) {
+  if (role !== 'gm') return null;
+  if (!delta) return { teamId, delta: 0 };
+  await sync.transact(`teams/${teamId}/score`, (cur) => (cur || 0) + delta);
+  return { teamId, delta };
+}
+
+/**
+ * GM: force the current round to end now — jumps to the next round's first
+ * turn (order computed by that round's orderMode) and opens tap-in, or ends
+ * the game if this was the last round. Any live question is discarded
+ * (unscored, not returned to the board — the GM chose to move on).
+ * @returns {Promise<?{round: number}|{ended: true}>}
+ */
+export async function endRound(sync, role) {
+  if (role !== 'gm') return null;
+  const round = readPath(sync, 'game/round');
+  const rounds = readPath(sync, 'settings/rounds') || [];
+  const nextRound = (round ?? 0) + 1;
+  if (nextRound >= rounds.length) return endGame(sync, role);
+  const teams = readPath(sync, 'teams') || {};
+  const order = computeOrder({ teams, mode: rounds[nextRound].orderMode || 'registration' });
+  await sync.update('game/question', null);
+  await sync.update('game/selectIntent', null);
+  await sync.update('game/round', nextRound);
+  await sync.update('game/rotation', 0);
+  await sync.update('game/turnIdx', 0);
+  await sync.update('game/teamOrder', order);
+  await sync.update('game/activeTeam', order[0] ?? null);
+  await openTapIn(sync, role, order[0] ?? null);
+  return { round: nextRound };
+}
+
+/**
+ * GM: end the game immediately (final standings = current scores).
+ * @returns {Promise<?{ended: true}>}
+ */
+export async function endGame(sync, role) {
+  if (role !== 'gm') return null;
+  await sync.update('game/selectIntent', null);
+  await sync.update('meta/status', 'ended');
+  return { ended: true };
+}
+
+/**
+ * GM: replace round configuration and/or orderRecalc after room creation.
+ * Refused while a question is live (mid-question rule changes would corrupt
+ * scoring); between turns/rounds it is safe — the scheduler and scoring read
+ * settings fresh on every action.
+ * @param {{rounds?: Array<Object>, orderRecalc?: string}} patch
+ * @returns {Promise<?{committed: boolean, reason?: string}>}
+ */
+export async function updateRoundSettings(sync, role, patch) {
+  if (role !== 'gm') return null;
+  if (readPath(sync, 'game/question')) return { committed: false, reason: 'question-in-progress' };
+  if (patch.rounds && patch.rounds.length) await sync.update('settings/rounds', patch.rounds);
+  if (patch.orderRecalc) await sync.update('settings/orderRecalc', patch.orderRecalc);
+  return { committed: true };
 }
 
 /**

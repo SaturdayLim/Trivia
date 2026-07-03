@@ -26,8 +26,12 @@
  */
 export function el(tag, attrs = {}, children = []) {
   const node = document.createElement(tag);
+  // <select value=X> can only select a matching <option> once its children
+  // exist, so defer that one assignment until after children are appended.
+  const deferredSelectValue = tag === 'select' && attrs && 'value' in attrs ? attrs.value : undefined;
   for (const [key, value] of Object.entries(attrs || {})) {
     if (value == null || value === false) continue;
+    if (deferredSelectValue !== undefined && key === 'value') continue;
     if (key === 'class' || key === 'className') {
       node.className = value;
     } else if (key === 'style' && typeof value === 'object') {
@@ -53,6 +57,7 @@ export function el(tag, attrs = {}, children = []) {
       typeof child === 'string' || typeof child === 'number' ? document.createTextNode(String(child)) : child
     );
   }
+  if (deferredSelectValue !== undefined) node.value = deferredSelectValue;
   return node;
 }
 
@@ -191,6 +196,42 @@ export function standingsList(teamsObj) {
       el('span', { class: 'standings-score' }, formatDelta(t.score || 0)),
     ])
   ));
+}
+
+/**
+ * `actions.advance()` moves `game.round/rotation/turnIdx` and re-opens
+ * tap-in, but never clears `game.question` — so after scoring, the finished
+ * question object lingers until the next `selectQuestion` overwrites it.
+ * Every role renders purely from state, so left unchecked every screen would
+ * keep showing the old reveal through the next team's tap-in and board
+ * selection. This tracks the "turn fingerprint" (round:rotation:turnIdx) a
+ * question was last seen progressing (not yet scored) under, and reports it
+ * stale the moment that fingerprint no longer matches the live one — which
+ * happens exactly when `advance()` runs, regardless of tap-in/selection
+ * state. Call `.check(tree)` at most once per render (it has side effects).
+ * @returns {{check: (tree: any) => boolean}}
+ */
+export function createStaleQuestionDetector() {
+  let seenFingerprint = null;
+  let trackedRef = null;
+  return {
+    check(tree) {
+      const game = tree && tree.game;
+      if (!game || !game.question) {
+        seenFingerprint = null;
+        trackedRef = null;
+        return false;
+      }
+      const fp = `${game.round}:${game.rotation}:${game.turnIdx}`;
+      if (game.question.ref !== trackedRef) {
+        trackedRef = game.question.ref;
+        seenFingerprint = fp; // first sight of this ref — treat as live
+      } else if (game.question.state !== 'scored') {
+        seenFingerprint = fp; // still progressing this turn — keep current
+      }
+      return fp !== seenFingerprint;
+    },
+  };
 }
 
 /**
