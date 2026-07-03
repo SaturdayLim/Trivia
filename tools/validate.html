@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stack — Question Bank Validator</title>
+<style>
+  :root {
+    --bg: #14171c;
+    --panel: #1d2129;
+    --border: #2c313c;
+    --text: #e7e9ec;
+    --muted: #9aa2b1;
+    --ok: #4caf50;
+    --bad: #e5484d;
+    --accent: #5b8def;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 24px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    line-height: 1.4;
+  }
+  h1 { margin: 0 0 4px; font-size: 1.4rem; }
+  h2 { margin: 28px 0 8px; font-size: 1.1rem; }
+  p.hint { color: var(--muted); margin: 0 0 20px; }
+  #dropzone {
+    border: 2px dashed var(--border);
+    border-radius: 10px;
+    padding: 36px 16px;
+    text-align: center;
+    color: var(--muted);
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s, background 0.15s;
+  }
+  #dropzone:hover, #dropzone:focus-visible, #dropzone.dragover {
+    border-color: var(--accent);
+    color: var(--text);
+    background: rgba(91, 141, 239, 0.08);
+    outline: none;
+  }
+  #fileInput { display: none; }
+  #actions { margin: 16px 0; display: flex; gap: 10px; flex-wrap: wrap; }
+  button {
+    background: var(--accent);
+    color: #0b0e13;
+    border: none;
+    border-radius: 6px;
+    padding: 9px 14px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button:disabled {
+    background: var(--border);
+    color: var(--muted);
+    cursor: not-allowed;
+  }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 0.88rem;
+    background: var(--panel);
+  }
+  .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 8px; }
+  th, td {
+    text-align: left;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  th { color: var(--muted); font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.03em; }
+  tr:last-child td { border-bottom: none; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 0.78rem; font-weight: 700; }
+  .badge.pass { background: rgba(76, 175, 80, 0.15); color: var(--ok); }
+  .badge.fail { background: rgba(229, 72, 77, 0.15); color: var(--bad); }
+  .empty { color: var(--muted); font-style: italic; padding: 10px 2px; }
+  code { background: rgba(255,255,255,0.06); padding: 1px 5px; border-radius: 4px; }
+</style>
+</head>
+<body>
+  <h1>Question Bank Validator</h1>
+  <p class="hint">
+    Drop one or more category <code>.md</code> files here, or click to browse. Each file is parsed with the
+    same <code>js/engine/questions.js</code> module the app uses, so a pass here means the app will load it.
+  </p>
+
+  <div id="dropzone" tabindex="0" role="button" aria-label="Drop or choose .md files">
+    Drop .md files here, or click to choose files
+  </div>
+  <input type="file" id="fileInput" accept=".md" multiple>
+
+  <div id="actions">
+    <button id="downloadIndexBtn" disabled>Download index.json (valid files)</button>
+    <button id="downloadCanonicalBtn" disabled>Download canonical copies (valid files)</button>
+  </div>
+
+  <h2>Files</h2>
+  <div class="table-wrap">
+    <table id="summaryTable">
+      <thead><tr><th>File</th><th>Status</th><th>Questions</th><th>Errors</th></tr></thead>
+      <tbody><tr><td class="empty" colspan="4">No files loaded yet.</td></tr></tbody>
+    </table>
+  </div>
+
+  <h2>Errors</h2>
+  <div class="table-wrap">
+    <table id="errorTable">
+      <thead><tr><th>File</th><th>Line</th><th>Message</th></tr></thead>
+      <tbody><tr><td class="empty" colspan="3">No errors.</td></tr></tbody>
+    </table>
+  </div>
+
+  <script type="module">
+    import { parseCategory, serializeCategory } from '../js/engine/questions.js';
+
+    /** @type {Array<{filename: string, result: import('../js/engine/questions.js').ParseResult}>} */
+    let entries = [];
+
+    const dropzone = document.getElementById('dropzone');
+    const fileInput = document.getElementById('fileInput');
+    const summaryBody = document.querySelector('#summaryTable tbody');
+    const errorBody = document.querySelector('#errorTable tbody');
+    const downloadIndexBtn = document.getElementById('downloadIndexBtn');
+    const downloadCanonicalBtn = document.getElementById('downloadCanonicalBtn');
+
+    dropzone.addEventListener('click', () => fileInput.click());
+    dropzone.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); }
+    });
+    dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('dragover'); });
+    dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
+    dropzone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropzone.classList.remove('dragover');
+      handleFiles(e.dataTransfer.files);
+    });
+    fileInput.addEventListener('change', () => {
+      handleFiles(fileInput.files);
+      fileInput.value = '';
+    });
+
+    /** @param {FileList} fileList */
+    async function handleFiles(fileList) {
+      const files = Array.from(fileList).filter((f) => f.name.toLowerCase().endsWith('.md'));
+      if (files.length === 0) return;
+      const next = [];
+      for (const file of files) {
+        const text = await file.text();
+        const result = parseCategory(text, file.name);
+        next.push({ filename: file.name, result });
+      }
+      entries = next;
+      render();
+    }
+
+    function render() {
+      renderSummary();
+      renderErrors();
+      const validCount = entries.filter((e) => e.result.errors.length === 0).length;
+      downloadIndexBtn.disabled = validCount === 0;
+      downloadCanonicalBtn.disabled = validCount === 0;
+    }
+
+    function renderSummary() {
+      summaryBody.innerHTML = '';
+      if (entries.length === 0) {
+        summaryBody.innerHTML = '<tr><td class="empty" colspan="4">No files loaded yet.</td></tr>';
+        return;
+      }
+      for (const { filename, result } of entries) {
+        const pass = result.errors.length === 0;
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${escapeHtml(filename)}</td>
+          <td><span class="badge ${pass ? 'pass' : 'fail'}">${pass ? 'PASS' : 'FAIL'}</span></td>
+          <td>${pass ? result.questions.length : '—'}</td>
+          <td>${pass ? 0 : result.errors.length}</td>
+        `;
+        summaryBody.appendChild(tr);
+      }
+    }
+
+    function renderErrors() {
+      errorBody.innerHTML = '';
+      const rows = entries.flatMap((e) => e.result.errors);
+      if (rows.length === 0) {
+        errorBody.innerHTML = '<tr><td class="empty" colspan="3">No errors.</td></tr>';
+        return;
+      }
+      for (const err of rows) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${escapeHtml(err.file)}</td><td>${err.line}</td><td>${escapeHtml(err.msg)}</td>`;
+        errorBody.appendChild(tr);
+      }
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, (c) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+      }[c]));
+    }
+
+    function triggerDownload(filename, content, mime) {
+      const blob = new Blob([content], { type: mime });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    }
+
+    downloadIndexBtn.addEventListener('click', () => {
+      const validFilenames = entries.filter((e) => e.result.errors.length === 0).map((e) => e.filename);
+      triggerDownload('index.json', JSON.stringify(validFilenames), 'application/json');
+    });
+
+    downloadCanonicalBtn.addEventListener('click', () => {
+      const valid = entries.filter((e) => e.result.errors.length === 0);
+      valid.forEach(({ filename, result }, i) => {
+        setTimeout(() => {
+          const text = serializeCategory({ category: result.category, questions: result.questions });
+          triggerDownload(filename, text, 'text/markdown');
+        }, i * 200);
+      });
+    });
+  </script>
+</body>
+</html>

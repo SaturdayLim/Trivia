@@ -1,0 +1,134 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Stack sync-layer test harness</title>
+<style>
+  body { font: 14px/1.45 system-ui, sans-serif; margin: 1.5rem; max-width: 900px; }
+  fieldset { border: 1px solid #bbb; margin-bottom: 1rem; }
+  button { margin: 0 .3rem .3rem 0; padding: .35rem .8rem; }
+  input, select { padding: .3rem; }
+  #tree { background: #111; color: #9fe89f; padding: .8rem; min-height: 8rem;
+          max-height: 20rem; overflow: auto; white-space: pre; font: 12px/1.4 monospace; }
+  #log  { background: #f4f4f4; padding: .8rem; max-height: 12rem; overflow: auto;
+          font: 12px/1.4 monospace; }
+  #roster { font: 12px/1.4 monospace; }
+  .ok { color: #0a7a0a; } .bad { color: #b00020; }
+  li { margin-bottom: .35rem; }
+</style>
+
+<h1>Sync test harness (mock driver)</h1>
+
+<fieldset>
+  <legend>Session</legend>
+  <label>Room <input id="room" value="TEST1" size="6"></label>
+  <label>Role <select id="role"><option>gm</option><option>player</option><option>display</option></select></label>
+  <button id="create">Create room (GM)</button>
+  <button id="join">Join room</button>
+  <span id="status">not connected</span>
+</fieldset>
+
+<fieldset>
+  <legend>Actions</legend>
+  <button id="setRandom" disabled>Set random value</button>
+  <button id="race" disabled>Tap-in race (2 conflicting transacts)</button>
+  <button id="clearWinner" disabled>Clear race winner</button>
+  <button id="closeBtn" disabled>Close session</button>
+</fieldset>
+
+<fieldset><legend>Presence</legend><div id="roster">—</div></fieldset>
+<fieldset><legend>Room tree (live)</legend><div id="tree">—</div></fieldset>
+<fieldset><legend>Log</legend><div id="log"></div></fieldset>
+
+<fieldset>
+  <legend>Manual checklist</legend>
+  <ol>
+    <li>Open this page in <b>3 tabs</b>. Tab 1: role <b>gm</b> → Create. Tabs 2–3: role <b>player</b> → Join. All trees identical, roster shows 3 connected.</li>
+    <li>"Set random value" from any tab → appears in every tree.</li>
+    <li>Clear winner, then click "Tap-in race" in tabs 2 and 3 as simultaneously as you can → the logs must agree on <b>exactly one</b> global winner.</li>
+    <li>Refresh the GM tab, then Create→no, <b>Join</b> as role gm with same room → tree survives (recovered), players keep working.</li>
+    <li>Close the GM tab entirely → player "Set random value" errors after ~10s.</li>
+  </ol>
+</fieldset>
+
+<script type="module">
+  import { createSync } from '../js/sync/adapter.js';
+  import * as driverMock from '../js/sync/driver-mock.js';
+
+  const $ = (id) => document.getElementById(id);
+  let sync = null;
+  let raceSeq = 0;
+  const myTag = 'tab-' + Math.random().toString(36).slice(2, 6);
+
+  function log(msg, cls = '') {
+    const div = document.createElement('div');
+    if (cls) div.className = cls;
+    div.textContent = `${new Date().toLocaleTimeString()} ${msg}`;
+    $('log').prepend(div);
+  }
+
+  async function connect(create) {
+    if (sync) { sync.close(); sync = null; }
+    const roomCode = $('room').value.trim().toUpperCase();
+    const role = $('role').value;
+    const clientId = myTag;
+    $('status').textContent = 'connecting…';
+    try {
+      sync = await createSync({
+        driver: driverMock, roomCode, clientId, role, create,
+        initialState: create ? { meta: { createdAt: Date.now() }, game: { tapIn: { winner: null } } } : null,
+      });
+    } catch (err) {
+      $('status').textContent = 'failed';
+      log(`connect failed: ${err.message}`, 'bad');
+      return;
+    }
+    $('status').textContent = `connected as ${role} (${clientId})`;
+    for (const id of ['setRandom', 'race', 'clearWinner', 'closeBtn']) $(id).disabled = false;
+    sync.onChange('/', (tree) => { $('tree').textContent = JSON.stringify(tree, null, 2); });
+    sync.onPresence((roster) => {
+      $('roster').textContent = roster
+        .map((p) => `${p.connected ? '●' : '○'} ${p.clientId} (${p.role})`)
+        .join('   ');
+    });
+    log(`connected: room=${roomCode} role=${role} create=${create}`, 'ok');
+  }
+
+  $('create').onclick = () => connect(true);
+  $('join').onclick = () => connect(false);
+
+  $('setRandom').onclick = async () => {
+    const key = 'k' + Math.random().toString(36).slice(2, 5);
+    try {
+      await sync.update(`scratch/${myTag}/${key}`, Math.floor(Math.random() * 1000));
+      log(`update scratch/${myTag}/${key} ok`, 'ok');
+    } catch (err) {
+      log(`update FAILED: ${err.message}`, 'bad');
+    }
+  };
+
+  $('race').onclick = () => {
+    // Two conflicting claims fired in the same tick: exactly one (across ALL
+    // tabs racing) may commit; every other attempt must see committed=false.
+    for (let i = 0; i < 2; i++) {
+      const claim = `${myTag}-${++raceSeq}`;
+      sync
+        .transact('game/tapIn/winner', (cur) => (cur == null ? claim : undefined))
+        .then(({ committed, snapshot }) => {
+          const winner = snapshot?.game?.tapIn?.winner;
+          log(`claim ${claim}: committed=${committed} | global winner=${winner}`, committed ? 'ok' : '');
+        })
+        .catch((err) => log(`claim ${claim} FAILED: ${err.message}`, 'bad'));
+    }
+  };
+
+  $('clearWinner').onclick = async () => {
+    await sync.update('game/tapIn/winner', null);
+    log('winner cleared', 'ok');
+  };
+
+  $('closeBtn').onclick = () => {
+    sync.close(); sync = null;
+    $('status').textContent = 'closed';
+    for (const id of ['setRandom', 'race', 'clearWinner', 'closeBtn']) $(id).disabled = true;
+    log('session closed');
+  };
+</script>
