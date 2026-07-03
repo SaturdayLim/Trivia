@@ -4,7 +4,21 @@ Objective: web-app version of the Stack trivia game. Static frontend (GitHub Pag
 Firebase Spark realtime sync behind a swappable adapter. Roles: Player / GM / Display.
 Questions live as one Markdown file per category in this repo.
 
-## Status: PHASE 1 — foundations build (rules mined, PRD final 2026-07-03)
+## Status: PHASE 2 — UI build in flight (engine + content + sync + importer done 2026-07-03)
+
+## Done so far (all committed)
+- Parser/validator + sample + 3 demo categories (T3) — node round-trip verified
+- Sync adapter + mock driver (T5) — reviewed, hardened (request dedup, atomic
+  tap-in gate), node smoke-tested; manual harness tools/sync-test.html
+- Game engine (T6) — scoring/scheduler/board/actions/storage; 100 node tests
+  green; review added setBoard, lobby actions, selectIntent flow, lockQuestion
+- Excel importer (T4) — tools/import.html; mapping verified against the real
+  900Q workbook; output round-trips through the shared parser
+- UI (T7) — agent in flight: index.html, css, main.js, js/ui/* per PRD §6
+- Content loaded (2026-07-03): 60 categories live in questions/ (30 bank +
+  30 archive-*), used-legacy.json (251 refs from Database.xlsm Archive col L),
+  game-defaults.json (first-night board). Integration pass must wire: GM picker
+  preset from game-defaults.json + one-tap used-legacy import into storage.recordUsed.
 
 ## Decisions locked (interview 2026-07-02)
 | Area | Decision |

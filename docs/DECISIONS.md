@@ -35,3 +35,5 @@ PROVISIONAL (recommended, user AFK — veto anytime), MINED (from v6 sources), O
 | 28 | Question files: variable counts (≥1 per difficulty, sequential IDs); game draws tierSize=4 per difficulty | AMENDED | bank ≈30/cat would waste 60% at a fixed 12; user's "12 per category" preserved as the board draw |
 | 29 | Sudden death default ×2 multiplier | MINED | Leaderboard H formula: stage 4 → ×2 |
 | 30 | v6 turn order & contest scoring were manual/social (E column hand-filled; +/nil/− host buttons) | MINED | webapp automates both, GM override retained |
+| 31 | Legacy import: 30 bank + 30 archive categories emitted (archive-* prefix); 8 micro-categories skipped (can't fill 1/difficulty, 0 used flags lost); 6 rows skipped for answer-text bugs (see questions/import-report.txt) | EXECUTED 2026-07-03 | Archive "Used?" col L → questions/used-legacy.json (251 refs), surfaced as one-tap import into GM used-memory |
+| 32 | First game night board = Marvel, 2000s Pop, Desserts, Flags, Place Names, Ocean, Etymology, Inventions, Legends, Memes | LOCKED (user) | questions/game-defaults.json preloads the GM category picker |

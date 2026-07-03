@@ -1,0 +1,21 @@
+LEGACY IMPORT 2026-07-03T07:52:04.912Z
+emitted: 60 categories (30 bank + 30 archive)
+used refs carried: 251
+
+SKIPPED CATEGORIES:
+  archive-Animals: 1 questions (E0/M0/H1) — needs >=1 per difficulty
+  archive-Cars: 1 questions (E0/M0/H1) — needs >=1 per difficulty
+  archive-Ingredients: 5 questions (E0/M0/H5) — needs >=1 per difficulty
+  archive-Marvel: 1 questions (E0/M0/H1) — needs >=1 per difficulty
+  archive-People: 3 questions (E0/M0/H3) — needs >=1 per difficulty
+  archive-Science: 1 questions (E0/M0/H1) — needs >=1 per difficulty
+  archive-Shows: 1 questions (E0/M1/H0) — needs >=1 per difficulty
+  archive-Worldwide: 8 questions (E0/M3/H5) — needs >=1 per difficulty
+
+SKIPPED ROWS (fix these in Excel or the .md files if wanted):
+  archive-Movies row 35: answer 'Aragon, the Warrior' matches 0 options
+  archive-Music row 40: answer 'Max' matches 0 options
+  archive-Luxury row 142: answer 'Jonathan Anderson is a British fashion designer who has been the creative director of Loewe since 2013.' matches 0 options
+  archive-Nature row 192: answer 'Sequoia' matches 0 options
+  archive-Shows row 242: missing question/option
+  archive-Nature row 349: answer 'Chihuahua' matches 0 options
