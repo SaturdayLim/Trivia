@@ -4,7 +4,7 @@ Objective: web-app version of the Stack trivia game. Static frontend (GitHub Pag
 Firebase Spark realtime sync behind a swappable adapter. Roles: Player / GM / Display.
 Questions live as one Markdown file per category in this repo.
 
-## Status: BUILD COMPLETE (2026-07-03); Firebase wired + pushed to GitHub (2026-07-04) — pending user: browser click-through, live cross-device test
+## Status: BUILD COMPLETE (2026-07-03); Firebase wired, NSFW/Nat categories removed, repo public + Pages enabled (2026-07-04) — pending user: browser click-through, live cross-device test
 
 ## Acceptance criteria (PRD §7) verdicts
 | # | Criterion | Verdict |
@@ -78,7 +78,7 @@ Questions live as one Markdown file per category in this repo.
 
 ## Blocked on user (batch when back)
 1. ~~Firebase project~~ — DONE 2026-07-04: project `stack-ep5` created, config wired, driver swapped live.
-2. GitHub repo — PARTLY DONE 2026-07-04: created & pushed `SaturdayLim/Trivia` as **private** (safe default, not an AFK judgment call). Still OPEN (user): make public + enable Pages, or pick a host that can deploy from a private source — see docs/DECISIONS.md #33 (blocked on `questions/archive-nsfw.md` being world-readable if public).
+2. ~~GitHub repo visibility~~ — DONE 2026-07-04: removed `questions/archive-nsfw.md` and `questions/archive-nat.md` (Nat's birthday category), then made `SaturdayLim/Trivia` public and enabled GitHub Pages (docs/DECISIONS.md #33).
 3. Confirm: vanilla-JS stack, challenge visibility rule (does challenger see selecting team's locked answer before challenging?), Crown/Target phase semantics if mining is inconclusive.
 4. Live click-through: once hosting is decided, open the live URL on two real devices and run the docs/FIREBASE-SETUP.md §6 verification checklist.
 
