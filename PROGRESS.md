@@ -78,9 +78,9 @@ Questions live as one Markdown file per category in this repo.
 
 ## Blocked on user (batch when back)
 1. ~~Firebase project~~ — DONE 2026-07-04: project `stack-ep5` created, config wired, driver swapped live.
-2. ~~GitHub repo~~ — DONE 2026-07-04: created `SaturdayLim/Trivia` (public, Pages enabled — PROVISIONAL call made AFK, see docs/DECISIONS.md #33, veto anytime).
+2. GitHub repo — PARTLY DONE 2026-07-04: created & pushed `SaturdayLim/Trivia` as **private** (safe default, not an AFK judgment call). Still OPEN (user): make public + enable Pages, or pick a host that can deploy from a private source — see docs/DECISIONS.md #33 (blocked on `questions/archive-nsfw.md` being world-readable if public).
 3. Confirm: vanilla-JS stack, challenge visibility rule (does challenger see selecting team's locked answer before challenging?), Crown/Target phase semantics if mining is inconclusive.
-4. Live click-through: open the Pages URL on two real devices and run the docs/FIREBASE-SETUP.md §6 verification checklist.
+4. Live click-through: once hosting is decided, open the live URL on two real devices and run the docs/FIREBASE-SETUP.md §6 verification checklist.
 
 ## Next
 - T3 parser/validator, T4 importer, T5 sync layer (agents)
