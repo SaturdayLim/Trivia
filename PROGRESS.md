@@ -13,14 +13,13 @@ Questions live as one Markdown file per category in this repo.
   in the deploy (Vercel CLI falls back to .gitignore without it); it also keeps
   Firebase.txt / tests / PROGRESS.md out. Verified live: firebase-config.js 200,
   Firebase.txt + PROGRESS.md 404.
-- GitHub Pages (https://saturdaylim.github.io/Trivia/) still lacks firebase-config.js
-  (gitignored → not in repo), so Pages can't connect to Firebase; Vercel is now the
-  canonical host. Decide later: commit the config (it's public client config; RTDB
-  rules are the security boundary) or retire Pages.
+- firebase-config.js committed 2026-07-05 (public client config; RTDB rules are the
+  security boundary) → BOTH hosts fully functional: Vercel alias + GitHub Pages each
+  serve the config (verified 200). Repo default branch is `master` (not main) and is
+  Vercel's production branch; a stray remote `main` branch (same commit) exists —
+  delete on GitHub if unwanted.
 - Visual overhaul (CSS-only, commit a69826b): Fredoka/Nunito, glow accents, animated
   entry, TV-scale media query. Class names + palette custom properties unchanged.
-- NOT YET PUSHED to GitHub: commits a69826b (restyle) + the .vercelignore/PROGRESS
-  checkpoint — direct push to main was permission-blocked this session; user to push.
 
 ## Acceptance criteria (PRD §7) verdicts
 | # | Criterion | Verdict |
