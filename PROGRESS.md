@@ -78,7 +78,7 @@ Questions live as one Markdown file per category in this repo.
 
 ## Blocked on user (batch when back)
 1. ~~Firebase project~~ — DONE 2026-07-04: project `stack-ep5` created, config wired, driver swapped live.
-2. ~~GitHub repo visibility~~ — DONE 2026-07-04: removed `questions/archive-nsfw.md` and `questions/archive-nat.md` (Nat's birthday category), then made `SaturdayLim/Trivia` public and enabled GitHub Pages (docs/DECISIONS.md #33).
+2. ~~GitHub repo visibility~~ — DONE 2026-07-04: removed `questions/archive-nsfw.md` and `questions/archive-nat.md` (Nat's birthday category), then made `SaturdayLim/Trivia` public and enabled GitHub Pages, live at https://saturdaylim.github.io/Trivia/ (docs/DECISIONS.md #33).
 3. Confirm: vanilla-JS stack, challenge visibility rule (does challenger see selecting team's locked answer before challenging?), Crown/Target phase semantics if mining is inconclusive.
 4. Live click-through: once hosting is decided, open the live URL on two real devices and run the docs/FIREBASE-SETUP.md §6 verification checklist.
 
