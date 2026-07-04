@@ -29,11 +29,12 @@ PROVISIONAL (recommended, user AFK — veto anytime), MINED (from v6 sources), O
 | 22 | Modes = COMMUNITY/EXCLUSIVE/CONTEST/SUDDEN DEATH (VBA: Comm/Solo/Crown/Target) | MINED | full table RULES-v6 §A; v6 defaults ported into round config |
 | 23 | Category with 0 remaining questions is hidden (not greyed) | MINED | Scoring.bas LogAndReturn |
 | 24 | GM manual per-team +/nil/− after reveal → becomes rule-computed deltas + GM override | MINED | Scoring.bas TeamAction/LogAndReturn |
-| 25 | Firebase project config | OPEN (user) | Task 10 |
-| 26 | GitHub repo name/account, Pages | OPEN (user) | Task 11 |
+| 25 | Firebase project config | EXECUTED 2026-07-04 | Project `stack-ep5` (asia-southeast1); config wired into js/sync/firebase-config.js (gitignored); main.js SWAP POINT flipped to driver-firebase.js |
+| 26 | GitHub repo name/account | LOCKED (user) | Name `Trivia`, account SaturdayLim |
 | 27 | Crown/Target mechanics — resolved into #22 | MINED | Task 1 complete 2026-07-03 |
 | 28 | Question files: variable counts (≥1 per difficulty, sequential IDs); game draws tierSize=4 per difficulty | AMENDED | bank ≈30/cat would waste 60% at a fixed 12; user's "12 per category" preserved as the board draw |
 | 29 | Sudden death default ×2 multiplier | MINED | Leaderboard H formula: stage 4 → ×2 |
 | 30 | v6 turn order & contest scoring were manual/social (E column hand-filled; +/nil/− host buttons) | MINED | webapp automates both, GM override retained |
 | 31 | Legacy import: 30 bank + 30 archive categories emitted (archive-* prefix); 8 micro-categories skipped (can't fill 1/difficulty, 0 used flags lost); 6 rows skipped for answer-text bugs (see questions/import-report.txt) | EXECUTED 2026-07-03 | Archive "Used?" col L → questions/used-legacy.json (251 refs), surfaced as one-tap import into GM used-memory |
 | 32 | First game night board = Marvel, 2000s Pop, Desserts, Flags, Place Names, Ocean, Etymology, Inventions, Legends, Memes | LOCKED (user) | questions/game-defaults.json preloads the GM category picker |
+| 33 | Repo visibility + GitHub Pages | LOCKED (scope PROVISIONAL) | Public repo, Pages enabled from default branch root — free GitHub Pages needs public on a Free plan; note `questions/archive-nsfw.md` becomes publicly readable; user was AFK for this call — veto anytime by flipping the repo private in GitHub Settings (this disables Pages until upgrading or switching host) |

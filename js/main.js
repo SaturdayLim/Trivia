@@ -8,10 +8,11 @@
  * js/ui/*.js module) references a driver module directly.
  */
 import { createSync } from './sync/adapter.js';
-// SWAP POINT: replace with `import * as driver from './sync/driver-firebase.js';`
-// to move from same-device testing to real Firebase RTDB sync. createSync's
-// contract is driver-agnostic, so nothing else in the app needs to change.
-import * as driver from './sync/driver-mock.js';
+// SWAP POINT: currently on real Firebase RTDB sync (docs/FIREBASE-SETUP.md done
+// 2026-07-04). Revert to `import * as driver from './sync/driver-mock.js';` for
+// same-device offline testing. createSync's contract is driver-agnostic, so
+// nothing else in the app needs to change.
+import * as driver from './sync/driver-firebase.js';
 import { registerClient } from './engine/actions.js';
 import { getOrCreateClientId, loadIdentity, saveIdentity } from './engine/storage.js';
 import { applyPalette } from './ui/palette.js';

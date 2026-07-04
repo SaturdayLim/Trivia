@@ -4,7 +4,7 @@ Objective: web-app version of the Stack trivia game. Static frontend (GitHub Pag
 Firebase Spark realtime sync behind a swappable adapter. Roles: Player / GM / Display.
 Questions live as one Markdown file per category in this repo.
 
-## Status: BUILD COMPLETE (2026-07-03) — pending user: click-through, Firebase config, GitHub deploy
+## Status: BUILD COMPLETE (2026-07-03); Firebase wired + pushed to GitHub (2026-07-04) — pending user: browser click-through, live cross-device test
 
 ## Acceptance criteria (PRD §7) verdicts
 | # | Criterion | Verdict |
@@ -26,7 +26,7 @@ Questions live as one Markdown file per category in this repo.
 | 15 | Refresh resume | Built (identity restore, GM serializer recovery, settings hydration); click pending |
 | 16 | Timer expiry locks, unanswered 0 | PASS (auto lockQuestion + scoring) |
 | 17 | Importer on real bank | PASS — executed: 60 categories, 0 parse errors |
-| 18 | Firebase cross-device | BLOCKED on user (tasks 10/11) |
+| 18 | Firebase cross-device | Config wired + driver swapped 2026-07-04 (docs/DECISIONS.md #25); live 2-device click-through still pending user |
 
 ## Bugs found & fixed in integration
 - advance() left the scored question in state → requestSelection deadlocked every
@@ -77,9 +77,10 @@ Questions live as one Markdown file per category in this repo.
 | Stack (provisional) | No-build vanilla JS ES modules (user hasn't confirmed) |
 
 ## Blocked on user (batch when back)
-1. Firebase project: needs user's Google account — 10-min console setup, then paste config into js/sync/firebase-config.js. Until then everything runs on the local mock driver (BroadcastChannel, multi-tab on one device).
-2. GitHub repo: name + account to create/push + enable Pages.
+1. ~~Firebase project~~ — DONE 2026-07-04: project `stack-ep5` created, config wired, driver swapped live.
+2. ~~GitHub repo~~ — DONE 2026-07-04: created `SaturdayLim/Trivia` (public, Pages enabled — PROVISIONAL call made AFK, see docs/DECISIONS.md #33, veto anytime).
 3. Confirm: vanilla-JS stack, challenge visibility rule (does challenger see selecting team's locked answer before challenging?), Crown/Target phase semantics if mining is inconclusive.
+4. Live click-through: open the Pages URL on two real devices and run the docs/FIREBASE-SETUP.md §6 verification checklist.
 
 ## Next
 - T3 parser/validator, T4 importer, T5 sync layer (agents)
