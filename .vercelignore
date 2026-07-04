@@ -1,0 +1,7 @@
+# Vercel upload filter. Unlike git, the deploy MUST include the gitignored
+# js/sync/firebase-config.js (public web config; RTDB rules are the security
+# boundary) — so this file exists to override the .gitignore fallback.
+Firebase.txt
+.git
+tests
+PROGRESS.md

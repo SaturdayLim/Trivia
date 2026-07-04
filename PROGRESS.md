@@ -4,7 +4,23 @@ Objective: web-app version of the Stack trivia game. Static frontend (GitHub Pag
 Firebase Spark realtime sync behind a swappable adapter. Roles: Player / GM / Display.
 Questions live as one Markdown file per category in this repo.
 
-## Status: BUILD COMPLETE (2026-07-03); Firebase wired, NSFW/Nat categories removed, repo public + Pages enabled (2026-07-04) — pending user: browser click-through, live cross-device test
+## Status: BUILD COMPLETE (2026-07-03); Firebase wired, repo public + Pages enabled (2026-07-04); visual overhaul + Vercel live at https://stack-trivia.vercel.app (2026-07-04) — pending user: browser click-through, live cross-device test
+
+## Hosting (2026-07-04)
+- Vercel: project `saturdaysvc/stack-trivia`, prod alias https://stack-trivia.vercel.app,
+  GitHub repo auto-connected during `vercel link` → pushes to main auto-deploy.
+- .vercelignore exists because js/sync/firebase-config.js is gitignored but REQUIRED
+  in the deploy (Vercel CLI falls back to .gitignore without it); it also keeps
+  Firebase.txt / tests / PROGRESS.md out. Verified live: firebase-config.js 200,
+  Firebase.txt + PROGRESS.md 404.
+- GitHub Pages (https://saturdaylim.github.io/Trivia/) still lacks firebase-config.js
+  (gitignored → not in repo), so Pages can't connect to Firebase; Vercel is now the
+  canonical host. Decide later: commit the config (it's public client config; RTDB
+  rules are the security boundary) or retire Pages.
+- Visual overhaul (CSS-only, commit a69826b): Fredoka/Nunito, glow accents, animated
+  entry, TV-scale media query. Class names + palette custom properties unchanged.
+- NOT YET PUSHED to GitHub: commits a69826b (restyle) + the .vercelignore/PROGRESS
+  checkpoint — direct push to main was permission-blocked this session; user to push.
 
 ## Acceptance criteria (PRD §7) verdicts
 | # | Criterion | Verdict |
