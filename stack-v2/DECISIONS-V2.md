@@ -29,3 +29,4 @@ All LOCKED (user) unless noted. V2-numbering; v1 decisions stand unless amended 
 | V2-22 | Display: QR join + landscape | "Flipped phone" = landscape orientation, not mirrored output. QR lib to be vendored/bundled. |
 | V2-23 | Game vocabulary standardized | Each **Game** = 4 **Stages**; each Stage = pre-set number of **Rotations**. All user-facing copy in proper case & spacing. |
 | V2-24 | v1 defect register is must-fix scope | The 10 A1 items (see PRD §8) are acceptance criteria for v2. |
+| V2-25 | Smoother motion is a design requirement | Eased transitions on all state changes (screens, scores, timer, reveal); no hard cuts. Tooling decided in S5 (Framer Motion or CSS). |

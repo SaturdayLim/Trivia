@@ -235,6 +235,23 @@ function persistSnapshot(session) {
   }
 }
 
+/**
+ * True when this browser has a persisted snapshot for `roomCode`. The mock
+ * driver's counterpart to `driver-firebase.roomExists` — probe before creating
+ * an auto-generated room code (V2-20), since `connect({create: true})` adopts
+ * the code unconditionally and would strand whatever tabs are on the old room.
+ *
+ * Same-origin only, by construction: localStorage is where a mock room lives.
+ * A room whose tabs are all open but which has never been persisted cannot
+ * exist — `becomeSerializer` persists immediately on create.
+ *
+ * @param {string} roomCode
+ * @returns {Promise<boolean>}
+ */
+export async function roomExists(roomCode) {
+  return readSnapshot(roomCode) !== null;
+}
+
 // ---------------------------------------------------------------------------
 // Session helpers
 // ---------------------------------------------------------------------------

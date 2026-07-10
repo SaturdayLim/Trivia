@@ -63,7 +63,8 @@ already includes the database URL.
 ## 4. Set the security rules
 
 1. Back in **Realtime Database**, click the **Rules** tab.
-2. Delete everything there and paste this instead:
+2. Delete everything there and paste the contents of **`firebase-rules.json`**
+   (repo root — kept as a file so the console and the repo can't drift apart):
    ```json
    {
      "rules": {
@@ -78,6 +79,15 @@ already includes the database URL.
            ".read": true,
            ".write": true
          }
+       },
+       "exposure": {
+         ".read": true,
+         ".write": true,
+         "$category": {
+           "$questionId": {
+             ".validate": "newData.isNumber()"
+           }
+         }
        }
      }
    }
@@ -88,11 +98,27 @@ already includes the database URL.
 *is* the shared secret, the same trust model as a Jackbox-style party game.
 Anyone who has the code can read/write that one room (`rooms/<code>` and
 `presence/<code>`); nobody can touch any other room, and everything outside
-those two trees stays locked by default (Realtime Database denies access
+those three trees stays locked by default (Realtime Database denies access
 unless a rule explicitly grants it). There's no personal data at stake beyond
 whatever nickname a player types in, and rooms are short-lived. This rule set
 trades per-user auth for zero sign-up friction, which is the right trade for
 a couch game.
+
+**About `exposure/` (v2, decision V2-5):** cross-game used-question memory
+lives at the database root, not inside a room, because it has to outlive every
+room that writes to it. It can't be gated on a room code — a brand-new room
+must be able to read it before it has an audience — so it's world-readable and
+world-writable, like the rooms are. The `.validate` rule at least pins every
+leaf to a number (the epoch-ms reveal timestamp), so a malformed write is
+rejected rather than corrupting a category. The blast radius of an abusive
+write is "some questions get skipped or repeat at a game night"; the host can
+reset any category's exposure from the app.
+
+**About `hostPin` (v2, decision V2-19):** the PIN lives *inside* the room tree,
+so anyone already holding the room code can read it. It is not a security
+boundary — it exists so the host's own phone can reclaim the host seat after a
+crash, and so a curious player doesn't wander into the host screen by accident.
+The room code remains the only secret.
 
 ## 5. Paste the config into the app
 

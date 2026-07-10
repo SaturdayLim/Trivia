@@ -240,6 +240,39 @@ function ensureApp() {
   return appReadyPromise;
 }
 
+/**
+ * The shared Firebase App + Database, booting the SDK and config on first use.
+ *
+ * Exported for trees that live OUTSIDE `rooms/<roomCode>` and therefore cannot
+ * be addressed through the room-scoped adapter at all — specifically the global
+ * `exposure/` tree (PRD §2, V2-5; see src/state/exposure.js). Room state must
+ * still go through `createSync` + `engine/actions.js`; this is not a back door
+ * around the authority model.
+ *
+ * @returns {Promise<{firebase: Object, app: Object, rtdb: Object}>}
+ */
+export function getDatabase() {
+  return ensureApp();
+}
+
+/**
+ * True when `rooms/<roomCode>` already holds data. Probe before creating a
+ * room with an auto-generated code (V2-20) — `connect({create: true})` does a
+ * `set()`, which would evict whatever game is already living there.
+ *
+ * Reads only the room's `meta` child, not the whole tree: enough to prove
+ * occupancy, and it never pulls a full game state over the wire just to answer
+ * a yes/no.
+ *
+ * @param {string} roomCode
+ * @returns {Promise<boolean>}
+ */
+export async function roomExists(roomCode) {
+  const { rtdb } = await ensureApp();
+  const snap = await rtdb.ref(`rooms/${roomCode}/meta`).once('value');
+  return snap.exists();
+}
+
 // ---------------------------------------------------------------------------
 // connect() helpers
 // ---------------------------------------------------------------------------

@@ -18,6 +18,7 @@ import { getAtPath, splitPath } from '../sync/adapter.js';
 import { questionValue, MODES, DEFAULT_ROUNDS } from './scoring.js';
 import { advanceTurn, computeOrder } from './scheduler.js';
 import { parseRef } from './questions.js';
+import { initialLifecycle, makeSelectionClaim, pinMatches } from '../state/room.js';
 
 /**
  * One-shot synchronous read of a synced path. Relies on `sync.onChange`
@@ -52,24 +53,41 @@ function addIdToTier(board, slug, dif, id) {
 // ---------------------------------------------------------------------------
 
 /**
- * Create a room's full state tree (PRD §5.3) and write it once.
+ * Create a room's full state tree (PRD §5.3, plus the v2 additions in stack-v2
+ * PRD §2) and write it once.
+ *
+ * v2 additions, all at the room root so they read as one flat "about this
+ * room" block rather than being buried in `game`:
+ *   - `hostPin`      — set at creation; `claimHost` requires it (V2-19).
+ *   - `lifecycle`    — `{createdAt, lastActivityAt}`; drives 24h expiry (V2-20).
+ *   - `selectionClaim` — team-turn first-click lock (V2-14); null when free.
+ *
+ * `meta.createdAt` from v1 is gone: `lifecycle.createdAt` is now the single
+ * source of that truth.
+ *
  * @param {import('../sync/adapter.js').SyncHandle} sync
  * @param {string} role
  * @param {Object} opts
  * @param {string} opts.clientId - stamped into `meta.gmClientId`.
+ * @param {?string} [opts.hostPin] - from `room.generateHostPin()`; null in the
+ *   mock/offline flow where no rejoin story exists.
  * @param {Object} [opts.settings] - partial settings; `rounds` defaults to
  *   `scoring.DEFAULT_ROUNDS`, other fields to PRD §5.3 defaults.
  * @param {Array<{id: string, name: string, color: string, order: number}>} opts.teams
  * @returns {Promise<?Object>} the written tree, or `null` if `role !== 'gm'`.
  */
-export async function createRoomState(sync, role, { clientId, settings = {}, teams }) {
+export async function createRoomState(sync, role, { clientId, settings = {}, teams, hostPin = null }) {
   if (role !== 'gm') return null;
+  const now = sync.serverNow();
   const teamsMap = {};
   for (const t of teams) {
     teamsMap[t.id] = { name: t.name, color: t.color, order: t.order, score: 0, players: {} };
   }
   const tree = {
-    meta: { createdAt: sync.serverNow(), gmClientId: clientId, status: 'lobby', registrationLocked: false },
+    meta: { gmClientId: clientId, status: 'lobby', registrationLocked: false },
+    hostPin,
+    lifecycle: initialLifecycle(now),
+    selectionClaim: null,
     settings: {
       orderRecalc: settings.orderRecalc || 'perRound',
       tierSize: settings.tierSize || 4,
@@ -94,6 +112,172 @@ export async function createRoomState(sync, role, { clientId, settings = {}, tea
   };
   await sync.update('/', tree);
   return tree;
+}
+
+// ---------------------------------------------------------------------------
+// Lifecycle (V2-20)
+// ---------------------------------------------------------------------------
+
+/**
+ * Bump `lifecycle.lastActivityAt`, resetting the 24h expiry clock. Deliberately
+ * NOT gm-gated: a player joining a team or locking an answer is activity, and a
+ * room whose host has gone quiet mid-game must not age out under the players'
+ * feet (V2-20: "mid-game breaks survive").
+ *
+ * Fire-and-forget by design — a dropped touch costs at most a stale
+ * `lastActivityAt`, never a wrong game state, so callers shouldn't await it on
+ * a hot path.
+ *
+ * @param {import('../sync/adapter.js').SyncHandle} sync
+ * @returns {Promise<number>} the timestamp written.
+ */
+export async function touchActivity(sync) {
+  const now = sync.serverNow();
+  await sync.update('lifecycle/lastActivityAt', now);
+  return now;
+}
+
+/**
+ * Host: close the room for good (V2-20). Terminal — `isRoomExpired` reports a
+ * closed room as expired regardless of its activity clock, so nobody rejoins.
+ * @returns {Promise<?{closed: true}>}
+ */
+export async function closeRoom(sync, role) {
+  if (role !== 'gm') return null;
+  await sync.update('meta/status', 'closed');
+  await touchActivity(sync);
+  return { closed: true };
+}
+
+// ---------------------------------------------------------------------------
+// Host PIN + single-host invariant (V2-19)
+// ---------------------------------------------------------------------------
+
+/**
+ * Take the room's single host seat. Enforces the two halves of V2-19:
+ *
+ *   1. **PIN.** `pin` must match `hostPin`. Rooms created without a PIN
+ *      (mock/offline) refuse every claim rather than accepting any — an absent
+ *      PIN is not a blank one.
+ *   2. **No second concurrent host.** The seat is `meta.gmClientId`, taken by a
+ *      transaction so two devices racing a rejoin can't both win. The claim
+ *      succeeds only when the seat is empty, already ours, or its occupant is
+ *      provably gone — which this layer cannot know on its own. The caller
+ *      passes `hostPresent` (from `sync.onPresence`: is `meta.gmClientId` in
+ *      the roster and `connected`?), because presence lives in the driver, not
+ *      the room tree.
+ *
+ * @param {import('../sync/adapter.js').SyncHandle} sync
+ * @param {Object} opts
+ * @param {string} opts.clientId - the device asking to be host.
+ * @param {string} opts.pin
+ * @param {boolean} [opts.hostPresent=false] - is the current `meta.gmClientId`
+ *   live on the roster right now?
+ * @returns {Promise<{committed: boolean, reason?: 'bad-pin'|'host-present'}>}
+ */
+export async function claimHost(sync, { clientId, pin, hostPresent = false }) {
+  const stored = readPath(sync, 'hostPin');
+  if (!pinMatches(stored, pin)) return { committed: false, reason: 'bad-pin' };
+
+  const seated = readPath(sync, 'meta/gmClientId');
+  if (seated && seated !== clientId && hostPresent) {
+    return { committed: false, reason: 'host-present' };
+  }
+
+  const { snapshot } = await sync.transact('meta/gmClientId', (cur) => {
+    if (cur == null || cur === clientId) return clientId;
+    // Racing rejoin: whoever's transaction lands first wins the seat. The
+    // loser sees the winner's id here and aborts rather than overwriting it.
+    return hostPresent ? undefined : clientId;
+  });
+
+  // `committed` isn't the answer on its own. Two devices holding the same PIN
+  // can both see an empty seat, and the transaction serializes them: the second
+  // commits too, overwriting the first. The seat still holds exactly one id
+  // (the invariant V2-19 actually cares about), but the first device must learn
+  // it is no longer host. So trust the seat, not the write.
+  const seat = getAtPath(snapshot, splitPath('meta/gmClientId'));
+  if (seat !== clientId) return { committed: false, reason: 'host-present' };
+  await touchActivity(sync);
+  return { committed: true };
+}
+
+/**
+ * Host: vacate the seat (Return to Home), so a later device can claim it with
+ * the PIN without waiting for a presence timeout.
+ * @returns {Promise<?boolean>}
+ */
+export async function releaseHost(sync, role, clientId) {
+  if (role !== 'gm') return null;
+  const seated = readPath(sync, 'meta/gmClientId');
+  if (seated !== clientId) return false;
+  await sync.update('meta/gmClientId', null);
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Selection claim (V2-14)
+// ---------------------------------------------------------------------------
+
+/**
+ * First teammate to tap a category takes control of the team's selection UI
+ * and locks the others out until they press Back (V2-14).
+ *
+ * Transacts the whole `selectionClaim` node rather than a child of it, for the
+ * same reason `claimTapIn` transacts the whole gate: the "is it this team's
+ * turn, and is it unclaimed?" check has to be atomic with the claim itself, or
+ * two teammates tapping in the same tick can both read "unclaimed" and both win.
+ *
+ * A claim left behind by a previous turn (different `teamId`) is not honored —
+ * it is overwritten. `advance()` should still clear it, but the incoming team's
+ * screen must never be held hostage by a stale lock.
+ *
+ * @param {import('../sync/adapter.js').SyncHandle} sync
+ * @param {Object} opts
+ * @param {string} opts.playerId
+ * @param {string} opts.teamId
+ * @param {'category'|'difficulty'} [opts.screen='category']
+ * @returns {Promise<{committed: boolean, reason?: string, claim?: Object}>}
+ */
+export async function claimSelection(sync, { playerId, teamId, screen = 'category' }) {
+  const activeTeam = readPath(sync, 'game/activeTeam');
+  if (activeTeam !== teamId) return { committed: false, reason: 'not-active-team' };
+
+  const now = sync.serverNow();
+  const { committed, snapshot } = await sync.transact('selectionClaim', (cur) => {
+    if (cur == null) return makeSelectionClaim(playerId, teamId, now, screen);
+    if (cur.teamId !== teamId) return makeSelectionClaim(playerId, teamId, now, screen); // stale turn
+    if (cur.playerId === playerId) return { ...cur, screen }; // same claimant moving screens
+    return undefined; // a teammate holds it
+  });
+  const claim = getAtPath(snapshot, splitPath('selectionClaim'));
+  return committed ? { committed: true, claim } : { committed: false, reason: 'claimed-by-teammate', claim };
+}
+
+/**
+ * The claimant pressed Back: release the lock so any teammate may take it.
+ * Only the holder can release (a teammate's Back button must not steal it);
+ * the host clears claims wholesale via `clearSelectionClaim`.
+ * @returns {Promise<{committed: boolean, reason?: string}>}
+ */
+export async function releaseSelection(sync, { playerId, teamId }) {
+  const { committed } = await sync.transact('selectionClaim', (cur) => {
+    if (cur == null) return undefined;
+    if (cur.playerId !== playerId || cur.teamId !== teamId) return undefined;
+    return null;
+  });
+  return committed ? { committed: true } : { committed: false, reason: 'not-claim-holder' };
+}
+
+/**
+ * Host: drop any selection claim (turn advanced, question opened, Back at the
+ * host level).
+ * @returns {Promise<?boolean>}
+ */
+export async function clearSelectionClaim(sync, role) {
+  if (role !== 'gm') return null;
+  await sync.update('selectionClaim', null);
+  return true;
 }
 
 /**
@@ -299,6 +483,9 @@ export async function advance(sync, role) {
   // The finished (scored) question must not linger: requestSelection guards
   // on game/question, so leaving it set would deadlock the next selector.
   await sync.update('game/question', null);
+  // Likewise the outgoing team's selection lock (V2-14) — `claimSelection`
+  // survives a stale claim, but the UI shouldn't have to.
+  await sync.update('selectionClaim', null);
 
   if (next.phase === 'gameEnd') {
     await sync.update('meta/status', 'ended');
@@ -343,6 +530,7 @@ export async function endRound(sync, role) {
   const order = computeOrder({ teams, mode: rounds[nextRound].orderMode || 'registration' });
   await sync.update('game/question', null);
   await sync.update('game/selectIntent', null);
+  await sync.update('selectionClaim', null);
   await sync.update('game/round', nextRound);
   await sync.update('game/rotation', 0);
   await sync.update('game/turnIdx', 0);

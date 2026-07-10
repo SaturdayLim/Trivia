@@ -7,17 +7,23 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "icons:manifest": "node scripts/build-icon-manifest.mjs",
+    "migrate:exposure": "node scripts/migrate-exposure.mjs"
   },
   "dependencies": {
+    "qrcode": "^1.5.4",
     "react": "^19.2.7",
-    "react-dom": "^19.2.7"
+    "react-dom": "^19.2.7",
+    "react-router-dom": "^7.18.1"
   },
   "devDependencies": {
-    "@tailwindcss/vite": "^4.1.18",
+    "@tailwindcss/vite": "^4.3.2",
+    "@testing-library/react": "^16.3.2",
     "@vitejs/plugin-react": "^6.0.3",
-    "tailwindcss": "^4.1.18",
-    "vite": "^8.1.1",
-    "vitest": "^3.2.4"
+    "jsdom": "^29.1.1",
+    "tailwindcss": "^4.3.2",
+    "vite": "^8.1.4",
+    "vitest": "^3.2.7"
   }
 }
