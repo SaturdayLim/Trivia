@@ -1,5 +1,5 @@
 /**
- * js/sync/driver-firebase.js
+* src/sync/driver-firebase.js
  *
  * Firebase Realtime Database implementation of the sync driver contract
  * documented in adapter.js (`{connect, update, transact, subscribe, presence,
@@ -207,13 +207,13 @@ async function loadConfig() {
     mod = await import('./firebase-config.js');
   } catch {
     throw new Error(
-      'stack sync: js/sync/firebase-config.js not found — copy firebase-config.example.js to firebase-config.js — see docs/FIREBASE-SETUP.md'
+      'stack sync: src/sync/firebase-config.js not found — copy firebase-config.example.js to firebase-config.js — see docs/FIREBASE-SETUP.md'
     );
   }
   const config = mod && mod.default;
   if (!config || typeof config !== 'object' || !config.databaseURL) {
     throw new Error(
-      "stack sync: js/sync/firebase-config.js is missing required fields (databaseURL) — copy firebase-config.example.js to firebase-config.js and fill in your project's values — see docs/FIREBASE-SETUP.md"
+      "stack sync: src/sync/firebase-config.js is missing required fields (databaseURL) — copy firebase-config.example.js to firebase-config.js and fill in your project's values — see docs/FIREBASE-SETUP.md"
     );
   }
   return config;

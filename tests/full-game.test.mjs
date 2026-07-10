@@ -1,10 +1,12 @@
 // Headless full-game integration: 3 teams, 4 rounds (community/exclusive/
-// contest/suddendeath), driven ONLY through js/engine/actions.js over the
+// contest/suddendeath), driven ONLY through src/engine/actions.js over the
 // real adapter with an in-memory driver. Hand-computed score expectations.
-const base = new URL('../', import.meta.url).href;
-const { createSync, splitPath, getAtPath, setAtPath } = await import(base + 'js/sync/adapter.js');
-const A = await import(base + 'js/engine/actions.js');
 import assert from 'node:assert';
+import { test } from 'vitest';
+import { createSync, splitPath, getAtPath, setAtPath } from '../src/sync/adapter.js';
+import * as A from '../src/engine/actions.js';
+
+test('full game integration (community/exclusive/contest/suddendeath)', async () => {
 
 function makeTestDriver() {
   let tree = {};
@@ -205,3 +207,5 @@ await A.endGame(gm2, 'gm');
 assert.equal(read2('meta/status'), 'ended', 'endGame ends');
 
 console.log('FULL-GAME INTEGRATION: all assertions passed (12 turns, 4 modes, guards, endRound/endGame, finals t1=0 t2=7 t3=5)');
+
+});

@@ -1,5 +1,5 @@
 /**
- * js/sync/driver-mock.js
+* src/sync/driver-mock.js
  *
  * Same-device, multi-tab implementation of the sync driver contract documented
  * in adapter.js (`{connect, update, transact, subscribe, presence, offsetProbe,

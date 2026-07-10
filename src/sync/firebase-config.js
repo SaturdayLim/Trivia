@@ -1,5 +1,5 @@
 /**
- * js/sync/firebase-config.js
+* src/sync/firebase-config.js
  *
  * Live Firebase project config for this deployment. Committed on purpose:
  * a Firebase web config is a public client identifier (it ships to every

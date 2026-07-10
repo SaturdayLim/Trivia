@@ -1,0 +1,13 @@
+@import "tailwindcss";
+
+:root {
+  --stack-bg: #0b0c10;
+  --stack-accent: #ffe600;
+}
+
+body {
+  margin: 0;
+  background: var(--stack-bg);
+  color: #fff;
+  font-family: system-ui, 'Segoe UI', Roboto, sans-serif;
+}

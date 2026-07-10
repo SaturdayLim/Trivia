@@ -1,6 +1,12 @@
 # Local Firebase console scratch notes
 Firebase.txt
 
+# Node / Vite
+node_modules
+dist
+dist-ssr
+*.local
+
 # Office lock files
 ~$*
 

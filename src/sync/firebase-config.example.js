@@ -1,12 +1,12 @@
 /**
- * js/sync/firebase-config.example.js
+* src/sync/firebase-config.example.js
  *
  * Copy this file to js/sync/firebase-config.js and replace the placeholder
  * values below with your own Firebase project's Web App config snippet.
  *
  * Full click-by-click setup instructions: docs/FIREBASE-SETUP.md
  *
- * js/sync/firebase-config.js is gitignored — it holds your project's live
+* src/sync/firebase-config.js is gitignored — it holds your project's live
  * config and should never be committed.
  */
 export default {

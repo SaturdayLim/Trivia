@@ -1,5 +1,5 @@
 /**
- * js/sync/adapter.js
+* src/sync/adapter.js
  *
  * Driver-agnostic realtime sync layer for the Stack trivia app. Exposes a small
  * set of async primitives (update / transact / onChange / onPresence / serverNow
