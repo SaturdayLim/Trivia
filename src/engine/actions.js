@@ -91,6 +91,12 @@ export async function createRoomState(sync, role, { clientId, settings = {}, tea
     settings: {
       orderRecalc: settings.orderRecalc || 'perRound',
       tierSize: settings.tierSize || 4,
+      // V2-17's per-category N, and the display directory Players and Displays
+      // read instead of the Markdown. Both are normally written later by
+      // `updateBoardSettings`, but a caller that supplies them at creation must
+      // not have them silently dropped by this whitelist.
+      tierSizes: settings.tierSizes || {},
+      categoryMeta: settings.categoryMeta || {},
       boardSize: settings.boardSize || 10,
       categories: settings.categories || [],
       excludeUsed: settings.excludeUsed !== false,
@@ -237,17 +243,18 @@ export async function releaseHost(sync, role, clientId) {
  * @param {string} opts.playerId
  * @param {string} opts.teamId
  * @param {'category'|'difficulty'} [opts.screen='category']
+ * @param {?string} [opts.slug=null] - the chosen Category, once past the grid.
  * @returns {Promise<{committed: boolean, reason?: string, claim?: Object}>}
  */
-export async function claimSelection(sync, { playerId, teamId, screen = 'category' }) {
+export async function claimSelection(sync, { playerId, teamId, screen = 'category', slug = null }) {
   const activeTeam = readPath(sync, 'game/activeTeam');
   if (activeTeam !== teamId) return { committed: false, reason: 'not-active-team' };
 
   const now = sync.serverNow();
   const { committed, snapshot } = await sync.transact('selectionClaim', (cur) => {
-    if (cur == null) return makeSelectionClaim(playerId, teamId, now, screen);
-    if (cur.teamId !== teamId) return makeSelectionClaim(playerId, teamId, now, screen); // stale turn
-    if (cur.playerId === playerId) return { ...cur, screen }; // same claimant moving screens
+    if (cur == null) return makeSelectionClaim(playerId, teamId, now, screen, slug);
+    if (cur.teamId !== teamId) return makeSelectionClaim(playerId, teamId, now, screen, slug); // stale turn
+    if (cur.playerId === playerId) return { ...cur, screen, slug }; // same claimant moving screens
     return undefined; // a teammate holds it
   });
   const claim = getAtPath(snapshot, splitPath('selectionClaim'));
@@ -409,8 +416,12 @@ export async function revealQuestion(sync, role, correct, onUsedRef) {
     teamIds,
     value: question.value,
   });
-  await sync.update('game/question/state', 'revealed');
+  // Result BEFORE state: `state` and `result` are separate paths, so an
+  // observer can see one write before the other. Writing the result first means
+  // any client that sees `state === 'revealed'` already has the result to
+  // render — no window where a screen reads `result.correct` off null.
   await sync.update('game/question/result', { correct, deltas, fact: null });
+  await sync.update('game/question/state', 'revealed');
   if (typeof onUsedRef === 'function') onUsedRef(question.ref);
   return { deltas };
 }
@@ -568,6 +579,37 @@ export async function updateRoundSettings(sync, role, patch) {
 }
 
 /**
+ * GM: persist the Category selection (PRD §3.2 step 2) — which Categories are
+ * in play, each one's "Questions per Tier" N (V2-17), and the small display
+ * directory the Players and Displays need to name and illustrate a Category
+ * without fetching all 58 Markdown files onto a phone.
+ *
+ * Written at Confirm rather than held in the Host's React state, so a Host who
+ * refreshes mid-setup comes back to their choices, and so the Display can show
+ * "available Categories" before the Game begins.
+ *
+ * Refused while a question is live, for the same reason `updateRoundSettings`
+ * is: the board is drawn from these fields.
+ *
+ * @param {import('../sync/adapter.js').SyncHandle} sync
+ * @param {string} role
+ * @param {Object} patch
+ * @param {string[]} [patch.categories] - slugs in play.
+ * @param {Object<string, number>} [patch.tierSizes] - per-slug N.
+ * @param {Object<string, {name: string, icon: ?string, n: number}>} [patch.categoryMeta]
+ * @returns {Promise<?{committed: boolean, reason?: string}>}
+ */
+export async function updateBoardSettings(sync, role, patch) {
+  if (role !== 'gm') return null;
+  if (readPath(sync, 'game/question')) return { committed: false, reason: 'question-in-progress' };
+  if (patch.categories) await sync.update('settings/categories', patch.categories);
+  if (patch.tierSizes) await sync.update('settings/tierSizes', patch.tierSizes);
+  if (patch.categoryMeta) await sync.update('settings/categoryMeta', patch.categoryMeta);
+  await touchActivity(sync);
+  return { committed: true };
+}
+
+/**
  * Freeze/unfreeze self-serve registration (players can still join existing
  * teams mid-game per PRD §4.1; this gates team CREATION and renames).
  * @returns {Promise<?boolean>}
@@ -688,6 +730,27 @@ export async function claimTapIn(sync, teamId, playerId) {
     cur && cur.openFor === teamId && cur.winner == null ? { ...cur, winner: playerId } : undefined
   );
   return { committed, winner: getAtPath(snapshot, splitPath('game/tapIn/winner')) ?? null };
+}
+
+/**
+ * Give the tap-in back (V2-14's Back button). The selection claim and the
+ * tap-in gate are two halves of one idea — "which teammate is choosing" — and
+ * both have to let go together, or the next teammate to tap would hold the UI
+ * claim while `requestSelection` still refused them as `not-selector`.
+ *
+ * Only the winner may release, and only while the gate is still open for their
+ * team: a straggler cannot un-win a gate the GM has re-opened for someone else.
+ * @param {import('../sync/adapter.js').SyncHandle} sync
+ * @param {Object} opts
+ * @param {string} opts.teamId
+ * @param {string} opts.playerId
+ * @returns {Promise<{committed: boolean, reason?: string}>}
+ */
+export async function releaseTapIn(sync, { teamId, playerId }) {
+  const { committed } = await sync.transact('game/tapIn', (cur) =>
+    cur && cur.openFor === teamId && cur.winner === playerId ? { ...cur, winner: null } : undefined
+  );
+  return committed ? { committed: true } : { committed: false, reason: 'not-tapin-winner' };
 }
 
 /**

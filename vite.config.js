@@ -12,5 +12,12 @@ export default defineConfig({
   esbuild: { jsx: 'automatic' },
   test: {
     environment: 'node',
+    // `forks`, not the default `threads`: the mock sync driver talks over
+    // Node's `BroadcastChannel`, which is process-global. Under `threads` every
+    // concurrently-running test file shares one dispatcher, and a reveal diff
+    // meant for one room's tab can be starved by another file's traffic —
+    // flaky, and nothing to do with the app. Separate processes give each file
+    // its own channel space.
+    pool: 'forks',
   },
 })

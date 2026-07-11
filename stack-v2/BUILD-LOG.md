@@ -275,3 +275,89 @@ run git only on Michael's PowerShell or a /tmp clone.
    #9 (numeric fields typeable) land in S4's stage-setup UI — do not defer to S5.
 8. Still outstanding for a human: browser pass of tools/sync-test.html and a real
    2-phone + display lobby check; S4 should not silently absorb it.
+
+## S4 2026-07-11 - Host live loop + player selector/lock-in + display views - Opus
+Done:
+- New PURE layers (no React/sync/clock; each is a unit test, not a click-through):
+  - `src/state/stages.js` — the Stage vocabulary (V2-23) and the seam between it
+    and the engine's `RoundConfig`. Contestants Selector-Only/All maps to the
+    engine's exclusive/community modes; contest/suddendeath stay in the engine but
+    the v2 UI never writes them (V2-9). `defaultStages()` replaces v1's
+    DEFAULT_ROUNDS at room creation (v1's round 3 was `contest`). 30s default timer
+    (defect #8), typeable-field clamping (defect #9), `orderModeNext` for V2-10.
+  - `src/state/game.js` — the whole live-game view every screen branches on:
+    mayAnswer, holdsClaim/lockedOut (V2-14), hasExplicitLock (the V2-15
+    lock-in-vs-expiry distinction), missedIt (V2-16), cycleDelta (V2-11), timer
+    seconds, standings, log rows. `selectGame`/`selectMe`.
+  - `src/content/catalog.js` — Host loads the 58-file bank; Players/Displays read a
+    small `settings.categoryMeta` directory the Host writes at Confirm, so 30 phones
+    fetch nothing. Answer/fact never leave the Host device.
+- ENGINE — four ADDITIVE changes only, v1 logic untouched (regression suite green):
+  - `board.tierSizeFor` + `buildBoard` per-category N (V2-17); short tiers give what
+    they have. `scheduler.rotationOrderMode` + `advanceTurn` consult "Who Selects
+    Next" per rotation (V2-10), falling back to orderMode for v1 rounds.
+  - `actions`: `updateBoardSettings`, `releaseTapIn`; selectionClaim gains `slug`
+    (Display needs it, PRD §3.4); `revealQuestion` now writes result BEFORE state
+    (separate paths — an observer must never see `revealed` with a null result);
+    `createRoomState` now persists `tierSizes`/`categoryMeta` (were silently dropped
+    by its settings whitelist — real bug).
+- SCREENS: HostSetup (Category select + per-cat N + 4-Stage setup), HostGame (the
+  three authority effects: fulfil selection, seal on explicit lock-in, seal at
+  expiry after a grace window; delta toggles pre-filled per V2-11; extend re-opens
+  options per V2-15), PlayGame (claim=tap-in+selection as one gesture, difficulty,
+  options, big-letter lock-in, auto-lock at expiry per V2-15, no-DQ per V2-16),
+  DisplayGame (read-only home/difficulty/question/reveal). Shell screens (Host/Play/
+  Display) hand off to these once status=playing. `Peripherals` bar (Scores/Log/
+  Stage Settings all roles; Host adds Modifiers/QR/Return Home/Close Room).
+  ui.jsx gains NumberField (defect #9), Select (defect #7), Segmented, Sheet.
+- Real bugs found by tests, fixed in code: (1) createRoomState dropped tierSizes/
+  categoryMeta; (2) revealQuestion state-before-result race crashed screens on a
+  null result; (3) tap-in claimed AFTER the selection claim let the difficulty
+  screen appear before the selector seat was taken, so requestSelection raced and
+  was refused — now claim tap-in FIRST; (4) grids went inert `div`s while a write
+  was in flight instead of disabled buttons.
+Deviations from PRD (if any, + why):
+- Display carries NO tap-peripheral bar (a projector is not an input surface); it
+  shows Scores + Stage summary + remaining Categories inline on its home instead.
+  PRD §3.1 "peripherals per role" is satisfied for Host/Player; the Display's role
+  is to display. Flag if Michael wants the sheets mirrored there.
+- Vitest pool switched to `forks` (vite.config.js): the mock driver uses Node's
+  process-global BroadcastChannel; under the default `threads` pool concurrent test
+  files share one dispatcher and a reveal diff for one room can be starved by
+  another file's traffic — flaky, unrelated to the app. Separate processes fix it.
+- Archive categories (`archive-*`) are NOT filtered from the Host's grid: v1 showed
+  all 58 and nothing in the PRD retires them; curation is the Admin UI's job (V2-6).
+- Defects #2 (uniform tiles), #6 (proper case), #7/#8/#9 landed here as required.
+  Tooltips (#3) and motion (V2-25) remain S5.
+Vitest: 89 passed / 89 (15 files). New: stages (8), game-view (9), live-loop (6,
+  full turns through the real driver-mock: claim/select/lock/reveal/commit/advance,
+  V2-14/15/16 + mid-game join), live-turn/live-noanswer/live-back (3, real React
+  Host+Player+Display clicked through a whole turn in jsdom), form-controls (5,
+  defects #7/#9 directly). Pre-existing S1/S2/S3 suites all still green; `npm run
+  build` clean; dev server serves `/ /host /play /display /questions /icons` 200.
+Next / blockers:
+- STILL BLOCKED from S2 (Michael, unchanged): publish `firebase-rules.json` in the
+  RTDB console, then `npm run migrate:exposure -- --commit`. S4 runs correctly
+  against an empty/denied exposure tree (shows a banner, treats every question as
+  fresh), so this does not block playing — only the "don't repeat questions" memory.
+- HUMAN pass still owed (carried from S1/S3): real 2-phone + 1-display game on
+  Firebase, ≤1s sync spot-check, and tools/sync-test.html's 3-tab checklist. The
+  headless tests prove logic + React render + the mock driver, not physical devices.
+- S5 (Sonnet): design pass (Solutions suite) + defect #3 tooltips + motion (V2-25)
+  + copy/tooltip sweep. The screens are built to standards but plain.
+
+## S4 REVIEW (Fable) 2026-07-10 — APPROVED; all 3 deviations ACCEPTED
+Structural verification against host tree (VM mount unusable for fresh files —
+incident note above): V2-17 tierSizeFor/per-slug N confirmed in board.js; V2-11
+pre-filled deltas confirmed (game.js cycleDelta from engine result); V2-15 confirmed
+incl. Extend Timer in HostGame and the LOCK_GRACE_MS design (grace window for
+in-flight expiry locks — good engineering, keep); defects #7/#8/#9 in stages.js +
+ui.jsx NumberField/Select. Engine changes verified additive. Executable gate =
+Michael's local `npm test` (S4 reports 89/89; Fable could not replicate in sandbox
+due to mount staleness, not code).
+Deviations: (1) Display inline scores instead of tap-peripherals — correct, a
+projector is not an input surface; PRD §3.1 amended in spirit, noted for PRD v2.1.
+(2) forks pool — correct and well-reasoned. (3) archive-* in Host grid — agreed,
+curation belongs to the Admin UI (V2-6).
+S5 note: motion (V2-25) must not break LOCK_GRACE_MS timing or add transition
+delays to authority effects (fulfil/seal) — animate presentation, never authority.

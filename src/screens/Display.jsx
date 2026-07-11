@@ -16,6 +16,7 @@ import { Lobby } from '../components/Lobby.jsx';
 import { useLobby, useRoom } from '../app/useRoom.js';
 import { ROLE } from '../app/driver.js';
 import { registerClient } from '../engine/actions.js';
+import DisplayGame from './DisplayGame.jsx';
 
 /** Displays are unnamed hardware; number them so a Host with two can tell them apart. */
 function displayName(clientId) {
@@ -51,6 +52,12 @@ export default function Display() {
   }
   if (expired) {
     return <ErrorScreen title="This Game has ended" onHome={() => navigate('/')} />;
+  }
+
+  // Once the Game starts the Display stops being a lobby and becomes the board
+  // the room reads from across the sofa (PRD §3.4).
+  if (lobby.status === 'playing' || lobby.status === 'ended') {
+    return <DisplayGame room={room} sync={sync} />;
   }
 
   return (

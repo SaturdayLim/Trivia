@@ -23,14 +23,34 @@ function pickRandom(arr, n, rng) {
 }
 
 /**
+ * How many questions of each difficulty `slug` contributes (V2-17's "Questions
+ * per Tier", N). Per-category, falling back to the room-wide `tierSize` — which
+ * is what v1 had, and what every existing caller still passes.
+ * @param {{tierSize?: number, tierSizes?: Object<string, number>}} settings
+ * @param {string} slug
+ * @returns {number}
+ */
+export function tierSizeFor(settings, slug) {
+  const per = settings.tierSizes && settings.tierSizes[slug];
+  return typeof per === 'number' && per > 0 ? per : settings.tierSize;
+}
+
+/**
  * Build a fresh board: for each `settings.categories` slug present in
- * `categories`, draw min(tierSize, available) random fresh question ids per
- * difficulty (excluding `usedRefs` when `settings.excludeUsed`).
+ * `categories`, draw min(N, available) random fresh question ids per difficulty
+ * (excluding `usedRefs` when `settings.excludeUsed`), where N is that category's
+ * "Questions per Tier" setting.
+ *
+ * A tier shorter than N contributes what it has — V2-17 spells this out
+ * ("N=5 with only 3 Mediums → 13 questions") and `pickRandom`'s `Math.min` has
+ * always done it. Nothing here fails on a thin category; it just draws fewer.
+ *
  * @param {Object} opts
  * @param {Array<{slug: string, questions: Array<{id: string, dif: Difficulty}>}>} opts.categories
  * @param {Object} opts.settings
  * @param {string[]} opts.settings.categories - slugs to include on the board.
- * @param {number} opts.settings.tierSize
+ * @param {number} opts.settings.tierSize - the fallback N.
+ * @param {Object<string, number>} [opts.settings.tierSizes] - per-slug N (V2-17).
  * @param {boolean} opts.settings.excludeUsed
  * @param {Set<string>|string[]} [opts.usedRefs] - refs ("slug:id") to exclude.
  * @param {() => number} [opts.rng] - returns a float in [0,1); default Math.random.
@@ -44,13 +64,14 @@ export function buildBoard({ categories, settings, usedRefs = [], rng = Math.ran
 
   for (const cat of categories) {
     if (!wantSlugs.has(cat.slug)) continue;
+    const n = tierSizeFor(settings, cat.slug);
     const tiers = {};
     for (const dif of DIFFICULTIES) {
       const pool = cat.questions
         .filter((q) => q.dif === dif)
         .map((q) => q.id)
         .filter((id) => !(settings.excludeUsed && used.has(`${cat.slug}:${id}`)));
-      tiers[dif] = pickRandom(pool, settings.tierSize, rng);
+      tiers[dif] = pickRandom(pool, n, rng);
       for (const id of tiers[dif]) drawn.push(`${cat.slug}:${id}`);
     }
     board[cat.slug] = tiers;

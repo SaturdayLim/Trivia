@@ -46,9 +46,24 @@ export function computeOrder({ teams, mode }) {
 
 /**
  * @typedef {Object} SchedulerSettings
- * @property {Array<{rotations: number, orderMode: OrderMode}>} rounds
+ * @property {Array<{rotations: number, orderMode: OrderMode, orderModeNext?: OrderMode}>} rounds
  * @property {'perRound'|'perRotation'} orderRecalc
  */
+
+/**
+ * Which rule re-sorts the teams for the NEXT rotation of the round they are
+ * already in — V2-10's "Who Selects Next", as distinct from `orderMode`, which
+ * only ever seeds a round ("Who Selects First").
+ *
+ * v1 had one field doing both jobs. A round written before the split carries no
+ * `orderModeNext`, and falls back to `orderMode` — i.e. exactly what this
+ * function's absence used to mean.
+ * @param {{orderMode: OrderMode, orderModeNext?: OrderMode}} roundCfg
+ * @returns {OrderMode}
+ */
+export function rotationOrderMode(roundCfg) {
+  return roundCfg.orderModeNext || roundCfg.orderMode;
+}
 
 /**
  * @typedef {Object} NextTurn
@@ -89,7 +104,10 @@ export function advanceTurn(game, settings) {
   const roundCfg = rounds[round];
 
   if (rotationNext < roundCfg.rotations) {
-    const order = orderRecalc === 'perRotation' ? computeOrder({ teams, mode: roundCfg.orderMode }) : teamOrder;
+    // "Who Selects Next" (V2-10) governs here; "Who Selects First" governed the
+    // round's opening order and is not consulted again until the round changes.
+    const order =
+      orderRecalc === 'perRotation' ? computeOrder({ teams, mode: rotationOrderMode(roundCfg) }) : teamOrder;
     return { round, rotation: rotationNext, turnIdx: 0, teamOrder: order, activeTeam: order[0], phase: 'tapIn' };
   }
 

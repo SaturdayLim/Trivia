@@ -98,7 +98,13 @@ test('lifecycle: expires on close, or after 24h idle; mid-game breaks survive', 
 
 test('selection claim: holder drives, teammates lock out, other teams unaffected', () => {
   const claim = makeSelectionClaim('p1', 't1', 999, 'category');
-  assert.deepEqual(claim, { playerId: 'p1', teamId: 't1', screen: 'category', at: 999 });
+  assert.deepEqual(claim, { playerId: 'p1', teamId: 't1', screen: 'category', slug: null, at: 999 });
+
+  // The Category rides on the claim so the Display can draw the difficulty view
+  // (PRD §3.4) — no other synced node names it between the tap and the draw.
+  const picked = makeSelectionClaim('p1', 't1', 999, 'difficulty', 'marvel');
+  assert.equal(picked.slug, 'marvel');
+  assert.equal(picked.screen, 'difficulty');
 
   assert.ok(holdsClaim(claim, 'p1', 't1'), 'the claimant holds it');
   assert.ok(!holdsClaim(claim, 'p2', 't1'), 'a teammate does not');

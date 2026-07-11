@@ -22,6 +22,7 @@ import { ROLE } from '../app/driver.js';
 import { forgetRoom, loadIdentity, saveIdentity } from '../app/identity.js';
 import { canJoin, matchTeam, nextTeamColor, nextTeamOrder, teamKey } from '../state/lobby.js';
 import { createTeam, joinTeam, registerClient, touchActivity } from '../engine/actions.js';
+import PlayGame from './PlayGame.jsx';
 
 function JoinForm({ room, lobby, onSubmit, busy, error, initialName, initialTeam }) {
   const [playerName, setPlayerName] = useState(initialName || '');
@@ -218,6 +219,25 @@ export default function Play() {
         error={joinError}
         initialName={identity?.name}
         initialTeam={editing ? lobby.teams.find((t) => t.teamId === identity?.teamId)?.name : ''}
+      />
+    );
+  }
+
+  // The Game has begun: the lobby gives way to the live screens (PRD §3.3).
+  // A Player who joins mid-Game (V2-13) lands here the moment they Confirm —
+  // there is no separate "wait for the next Game" state, because there isn't one.
+  if (lobby.status === 'playing' || lobby.status === 'ended') {
+    return (
+      <PlayGame
+        sync={sync}
+        room={room}
+        roomCode={roomCode}
+        clientId={clientId}
+        teamId={identity.teamId}
+        onExit={() => {
+          forgetRoom(roomCode);
+          navigate('/');
+        }}
       />
     );
   }

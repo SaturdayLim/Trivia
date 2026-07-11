@@ -202,6 +202,10 @@ export function msUntilExpiry(room, now, ttlMs = ROOM_TTL_MS) {
  * @property {string} teamId - whose turn this claim belongs to; a claim from a
  *   past turn can never gate the current one.
  * @property {'category'|'difficulty'} screen - how far the claimant has got.
+ * @property {?string} slug - the Category chosen, once `screen` is 'difficulty'.
+ *   The Display needs it: PRD §3.4 shows a difficulty-selection view with that
+ *   Category's remaining counts per tier, and no other synced node names the
+ *   Category between the claim and the drawn question.
  * @property {number} at - epoch ms.
  */
 
@@ -213,10 +217,11 @@ export const CLAIM_SCREENS = ['category', 'difficulty'];
  * @param {string} teamId
  * @param {number} now
  * @param {'category'|'difficulty'} [screen='category']
+ * @param {?string} [slug=null]
  * @returns {SelectionClaim}
  */
-export function makeSelectionClaim(playerId, teamId, now, screen = 'category') {
-  return { playerId, teamId, screen, at: now };
+export function makeSelectionClaim(playerId, teamId, now, screen = 'category', slug = null) {
+  return { playerId, teamId, screen, slug, at: now };
 }
 
 /**
