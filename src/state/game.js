@@ -105,18 +105,40 @@ export function playerName(room, playerId) {
 }
 
 /**
- * Cycle one team's score delta through + / nil / − (V2-11). The magnitude is
- * always the question's value: a Host awarding points to a Team that never
- * locked (a verbal answer, a judgement call) means the full value, and V2-12
- * fixes the penalty at the same magnitude.
- * @param {number} current
+ * The three states a Team's delta can be in (V2-11, R3). A one-tap segmented
+ * control replaces v1's tap-to-cycle button: all three states are visible at
+ * once, so choosing one is a single, unambiguous tap.
+ */
+export const DELTA_SIGNS = [
+  { value: 'plus', label: 'Plus', symbol: '+' },
+  { value: 'nil', label: 'Nothing', symbol: '0' },
+  { value: 'minus', label: 'Minus', symbol: '−' },
+];
+
+/**
+ * Which of the three states a delta is currently in.
+ * @param {number} delta
+ * @returns {'plus'|'nil'|'minus'}
+ */
+export function signOfDelta(delta) {
+  if (delta > 0) return 'plus';
+  if (delta < 0) return 'minus';
+  return 'nil';
+}
+
+/**
+ * The delta a chosen sign resolves to. The magnitude is always the question's
+ * value: a Host awarding points to a Team that never locked (a verbal answer,
+ * a judgement call) means the full value, and V2-12 fixes the penalty at the
+ * same magnitude.
+ * @param {'plus'|'nil'|'minus'} sign
  * @param {number} value - `question.value`, multiplier already applied.
  * @returns {number}
  */
-export function cycleDelta(current, value) {
-  if (current > 0) return 0;
-  if (current === 0) return -value;
-  return value;
+export function deltaForSign(sign, value) {
+  if (sign === 'plus') return value;
+  if (sign === 'minus') return -value;
+  return 0;
 }
 
 /**
@@ -336,7 +358,12 @@ export function hasExplicitLock(locks, deadline) {
  * and Displays never load the Markdown, so the row is built from the ref, the
  * Category directory, and the deltas — no question text, which is the honest
  * amount of information the wire carries.
- * @param {Object} entry - `{ref, round, deltas, at}`
+ *
+ * `entry.selectedBy` (R4, PRD §8b) names who chose the question — written once
+ * at selection (`actions.selectQuestion`) and carried onto the log entry at
+ * commit, since by commit time the live selector state has already moved on
+ * to the next turn.
+ * @param {Object} entry - `{ref, round, deltas, at, selectedBy?}`
  * @param {Object} room
  * @returns {Object}
  */
@@ -351,6 +378,9 @@ export function logRow(entry, room) {
     stageNumber: (entry.round || 0) + 1,
     categoryName: (meta && meta.name) || slug,
     difficulty: difficulty(dif),
+    selectedBy: entry.selectedBy
+      ? { name: playerName(room, entry.selectedBy.playerId), team: teamName(room, entry.selectedBy.teamId) }
+      : null,
     scores: Object.entries(entry.deltas || {})
       .filter(([, d]) => d !== 0)
       .map(([teamId, delta]) => ({ teamId, name: teamName(room, teamId), delta }))

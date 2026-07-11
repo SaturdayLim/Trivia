@@ -9,8 +9,9 @@
  */
 
 import { useCallback, useMemo } from 'react';
-import { Screen } from '../components/ui.jsx';
+import { RoomCode, Screen } from '../components/ui.jsx';
 import { CategoryGrid, DifficultyGrid, Options, QuestionHeader, ScoreList, Timer } from '../components/game.jsx';
+import { QrCode, joinUrl } from '../components/QrCode.jsx';
 import { liveSlugs, selectGame, standings, tierCounts } from '../state/game.js';
 import { contestantsLabel, contestantsOf, stageSummary } from '../state/stages.js';
 
@@ -36,19 +37,59 @@ function StageStrip({ g }) {
   );
 }
 
-export default function DisplayGame({ room, sync }) {
+export default function DisplayGame({ room, roomCode, sync }) {
   const g = useMemo(() => selectGame(room), [room]);
   const serverNow = useCallback(() => (sync ? sync.serverNow() : Date.now()), [sync]);
   const rows = standings(room);
 
-  // --- Game over ------------------------------------------------------------
+  // --- The Host toggled Show QR Code (R7) ------------------------------------
+  // Overrides whatever this Display would otherwise show — mid-question
+  // included — because that is the point: hand the room a way back in without
+  // the Host having to pause the Game.
+  if (room && room.meta && room.meta.showQr) {
+    return (
+      <Frame>
+        <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col items-center justify-center gap-8 text-center">
+          <h1 className="text-5xl font-bold">Scan to Join</h1>
+          <QrCode value={joinUrl(roomCode)} size={320} />
+          <RoomCode code={roomCode} size="xl" />
+        </div>
+      </Frame>
+    );
+  }
+
+  // --- Game over --------------------------------------------------------------
   if (g.ended) {
+    // A plain podium (R6): the top three raised by rank, everyone else below
+    // as a normal list. Motion/medal polish is explicitly S5's, not this
+    // sprint's — "plain is fine" per the requirement.
+    const [first, second, third, ...rest] = rows;
+    const podiumHeight = { 1: 'pb-20', 2: 'pb-12', 3: 'pb-6' };
     return (
       <Frame>
         <h1 className="text-center text-6xl font-bold">Final Scores</h1>
-        <div className="mx-auto w-full max-w-3xl">
-          <ScoreList teams={rows} scale="lg" />
-        </div>
+        {rows.length > 0 ? (
+          <div className="mx-auto flex w-full max-w-4xl flex-1 items-end justify-center gap-6">
+            {[second, first, third].filter(Boolean).map((t) => (
+              <div
+                key={t.teamId}
+                className={`flex flex-col items-center gap-2 rounded-t-2xl border border-white/10 bg-white/[0.03] px-8 pt-6 ${podiumHeight[t.rank] || 'pb-6'}`}
+              >
+                <span className="text-lg text-white/50">#{t.rank}</span>
+                <span className="size-4 rounded-full" style={{ background: t.color }} />
+                <span className="text-2xl font-semibold">{t.name}</span>
+                <span className="font-mono text-4xl font-bold tabular-nums">{t.score}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-center text-2xl text-white/40">No Teams played.</p>
+        )}
+        {rest.length > 0 && (
+          <div className="mx-auto w-full max-w-3xl">
+            <ScoreList teams={rest} scale="lg" />
+          </div>
+        )}
       </Frame>
     );
   }
@@ -57,6 +98,9 @@ export default function DisplayGame({ room, sync }) {
   if (g.question) {
     const revealing = (g.qState === 'revealed' || g.qState === 'scored') && Boolean(g.result);
     const meta = g.slug ? g.categoryMeta[g.slug] : null;
+    // R1: highlight every Team's locked letter pre-reveal — safe by design,
+    // since a lock already zeroes the timer and locks everyone else (V2-15).
+    const lockedLetters = Object.values(g.locks || {}).map((l) => l.choice);
 
     return (
       <Frame>
@@ -77,6 +121,7 @@ export default function DisplayGame({ room, sync }) {
 
           <Options
             options={g.question.payload.options}
+            locked={lockedLetters}
             correct={revealing ? g.result.correct : null}
             scale="lg"
           />

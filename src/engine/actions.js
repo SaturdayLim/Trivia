@@ -155,6 +155,19 @@ export async function closeRoom(sync, role) {
   return { closed: true };
 }
 
+/**
+ * Host: toggle the shared "Show QR Code" overlay (R7, PRD §8b). Synced, not
+ * local UI state, so the SAME toggle that opens the Host's own QR sheet also
+ * switches every attached Display to the QR + Room Code view — and back, when
+ * the Host closes it.
+ * @returns {Promise<?boolean>}
+ */
+export async function setShowQr(sync, role, active) {
+  if (role !== 'gm') return null;
+  await sync.update('meta/showQr', !!active);
+  return !!active;
+}
+
 // ---------------------------------------------------------------------------
 // Host PIN + single-host invariant (V2-19)
 // ---------------------------------------------------------------------------
@@ -345,9 +358,14 @@ export async function openTapIn(sync, role, nextTeamId) {
  * @param {string} ref - "slug:id", e.g. "movie-night:E1".
  * @param {{q: string, options: string[]}} payloadWithoutAnswer - never
  *   includes `answer`/`fact` (PRD §5.3: the wire never carries them pre-reveal).
+ * @param {Object} [selector] - who chose this question (R4, PRD §8b), carried
+ *   onto the Question Log at commit; omitted for callers that don't know
+ *   (tests, the mid-question fallback paths).
+ * @param {?string} [selector.playerId]
+ * @param {?string} [selector.teamId]
  * @returns {Promise<?{ref: string, value: number}>}
  */
-export async function selectQuestion(sync, role, ref, payloadWithoutAnswer) {
+export async function selectQuestion(sync, role, ref, payloadWithoutAnswer, selector = {}) {
   if (role !== 'gm') return null;
   const { slug, id } = parseRef(ref);
   const dif = id[0];
@@ -366,12 +384,31 @@ export async function selectQuestion(sync, role, ref, payloadWithoutAnswer) {
     payload: payloadWithoutAnswer,
     locks: {},
     result: null,
+    selectedBy: selector.playerId ? { playerId: selector.playerId, teamId: selector.teamId || null } : null,
   });
   return { ref, value };
 }
 
 /**
  * Open the question for locking.
+ *
+ * Clears `game/question/locks` every time, not only on the first open. A
+ * (re)open is what "options unlock" (V2-15) means: any lock already on the
+ * tree belongs to the window that just ended, and leaving it behind is the
+ * root cause behind S4.6's R2 ("Extend Timer does nothing") — `hasExplicitLock`
+ * (state/game.js) reads a lock's `at` against the CURRENT deadline, so a
+ * leftover auto-lock from the old (smaller) deadline reads as an *explicit*
+ * Lock In against the new, later one and the Host's own authority effect
+ * reseals the question the instant it reopens. Clearing locks here removes
+ * the stale data instead of special-casing the read.
+ *
+ * Cleared FIRST, before `state`/`deadline` change — each `sync.update` is its
+ * own round trip, so another client's subscription can observe them one at a
+ * time. Clearing last would open a window where a listener sees the NEW
+ * deadline paired with the OLD locks still on the tree — precisely the
+ * misreading this fix exists to prevent, just delayed instead of removed.
+ * Clearing first means every state a listener can observe pairs a live
+ * deadline with locks that are already empty.
  * @param {import('../sync/adapter.js').SyncHandle} sync
  * @param {string} role
  * @param {number} deadline - epoch ms, or 0 for no timer.
@@ -379,6 +416,7 @@ export async function selectQuestion(sync, role, ref, payloadWithoutAnswer) {
  */
 export async function openQuestion(sync, role, deadline) {
   if (role !== 'gm') return null;
+  await sync.update('game/question/locks', {});
   await sync.update('game/question/state', 'open');
   await sync.update('game/question/openedAt', sync.serverNow());
   await sync.update('game/question/deadline', deadline || 0);
@@ -447,7 +485,7 @@ export async function commitScores(sync, role, overriddenDeltas) {
   const round = readPath(sync, 'game/round');
   await sync.transact('game/log', (cur) => [
     ...(cur || []),
-    { ref: question.ref, round, deltas: finalDeltas, at: sync.serverNow() },
+    { ref: question.ref, round, deltas: finalDeltas, at: sync.serverNow(), selectedBy: question.selectedBy || null },
   ]);
   await sync.update('game/question/result/deltas', finalDeltas);
   await sync.update('game/question/state', 'scored');

@@ -40,16 +40,19 @@ import {
   openTapIn,
   revealQuestion,
   selectQuestion,
+  setShowQr,
   skipQuestion,
 } from '../engine/actions.js';
 import {
+  DELTA_SIGNS,
   LOCK_GRACE_MS,
   OPTION_LETTERS,
-  cycleDelta,
+  deltaForSign,
   hasExplicitLock,
   initialDeltas,
   pastGrace,
   selectGame,
+  signOfDelta,
   standings,
 } from '../state/game.js';
 import { ROLE } from '../app/driver.js';
@@ -98,37 +101,58 @@ function WaitingForSelection({ g, onRelease }) {
   );
 }
 
-/** After reveal: one toggle per Team, pre-filled by auto-scoring (V2-11). */
-function DeltaToggles({ room, deltas, value, onCycle }) {
+/**
+ * After reveal: a 3-state Plus/Nothing/Minus control per Team, pre-filled by
+ * auto-scoring (V2-11). R3 replaces v1's tap-to-cycle button — clumsy because
+ * the current state wasn't visible until you'd already changed it — with all
+ * three states shown at once; one tap picks one.
+ */
+function DeltaToggles({ room, deltas, value, onSet }) {
   const rows = standings(room);
+  const toneFor = (sign, active) => {
+    if (!active) return 'text-white/40 hover:text-white/70';
+    if (sign === 'plus') return 'bg-emerald-400/20 text-emerald-300';
+    if (sign === 'minus') return 'bg-red-400/20 text-red-300';
+    return 'bg-white/15 text-white';
+  };
   return (
     <Card>
       <h2 className="mb-1 text-lg font-semibold">Points</h2>
       <p className="mb-4 text-sm text-white/50">
-        Tap a Team to cycle it through Plus, Nothing and Minus. Update commits every Team at once.
+        Pick Plus, Nothing or Minus for each Team. Update commits every Team at once.
       </p>
       <ul className="flex flex-col gap-2">
         {rows.map((t) => {
-          const delta = deltas[t.teamId] || 0;
-          const tone =
-            delta > 0
-              ? 'border-emerald-400/60 bg-emerald-400/10'
-              : delta < 0
-                ? 'border-red-400/60 bg-red-400/10'
-                : 'border-white/10';
+          const sign = signOfDelta(deltas[t.teamId] || 0);
           return (
-            <li key={t.teamId}>
-              <button
-                type="button"
-                onClick={() => onCycle(t.teamId)}
-                className={`flex min-h-[56px] w-full items-center gap-3 rounded-xl border px-4 text-left transition ${tone}`}
+            <li
+              key={t.teamId}
+              className="flex flex-wrap items-center gap-3 rounded-xl border border-white/10 px-4 py-3"
+            >
+              <span className="size-3 shrink-0 rounded-full" style={{ background: t.color }} />
+              <span className="truncate font-semibold">{t.name}</span>
+              <div
+                role="radiogroup"
+                aria-label={`${t.name} points`}
+                className="ml-auto flex gap-1 rounded-xl bg-black/40 p-1"
               >
-                <span className="size-3 shrink-0 rounded-full" style={{ background: t.color }} />
-                <span className="truncate font-semibold">{t.name}</span>
-                <span className="ml-auto font-mono text-lg font-bold tabular-nums">
-                  {delta > 0 ? `+${delta}` : delta}
-                </span>
-              </button>
+                {DELTA_SIGNS.map((opt) => {
+                  const active = sign === opt.value;
+                  return (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      role="radio"
+                      aria-checked={active}
+                      aria-label={`${t.name}: ${opt.label}`}
+                      onClick={() => onSet(t.teamId, opt.value)}
+                      className={`min-h-[44px] min-w-[44px] rounded-lg text-lg font-bold transition duration-300 ${toneFor(opt.value, active)}`}
+                    >
+                      {opt.symbol}
+                    </button>
+                  );
+                })}
+              </div>
             </li>
           );
         })}
@@ -175,7 +199,15 @@ export default function HostGame({ sync, room, roomCode, catalog, exposure, onEd
         setError(`The question ${ref} is on the board but not in the Category files.`);
         return;
       }
-      await selectQuestion(sync, ROLE.HOST, ref, { q: full.q, options: full.options });
+      // R4: who chose this question rides onto the Question Log at commit —
+      // capture it now, while the intent still names them.
+      await selectQuestion(
+        sync,
+        ROLE.HOST,
+        ref,
+        { q: full.q, options: full.options },
+        { playerId: intent.playerId, teamId: intent.teamId }
+      );
       await clearSelectIntent(sync, ROLE.HOST);
     })().catch((err) => {
       fulfilling.current = null;
@@ -271,11 +303,17 @@ export default function HostGame({ sync, room, roomCode, catalog, exposure, onEd
     adjustScore(sync, ROLE.HOST, teamId, delta).catch((err) => setError(err.message));
   };
 
+  // R7: the same toggle that opens the Host's own QR sheet also switches
+  // every attached Display to the QR + Room Code view, and back.
+  const handleShowQr = (active) => {
+    setShowQr(sync, ROLE.HOST, active).catch((err) => setError(err.message));
+  };
+
   const peripherals = (
     <Peripherals
       room={room}
       roomCode={roomCode}
-      host={{ onAdjust: handleAdjust, onEditStages, onReturnHome, onCloseRoom }}
+      host={{ onAdjust: handleAdjust, onEditStages, onReturnHome, onCloseRoom, onShowQr: handleShowQr }}
     />
   );
 
@@ -353,9 +391,7 @@ export default function HostGame({ sync, room, roomCode, catalog, exposure, onEd
                 room={room}
                 deltas={deltas}
                 value={g.value}
-                onCycle={(teamId) =>
-                  setDeltas((d) => ({ ...d, [teamId]: cycleDelta(d[teamId] || 0, g.value) }))
-                }
+                onSet={(teamId, sign) => setDeltas((d) => ({ ...d, [teamId]: deltaForSign(sign, g.value) }))}
               />
             )}
 

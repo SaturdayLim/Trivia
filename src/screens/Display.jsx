@@ -57,7 +57,7 @@ export default function Display() {
   // Once the Game starts the Display stops being a lobby and becomes the board
   // the room reads from across the sofa (PRD §3.4).
   if (lobby.status === 'playing' || lobby.status === 'ended') {
-    return <DisplayGame room={room} sync={sync} />;
+    return <DisplayGame room={room} roomCode={roomCode} sync={sync} />;
   }
 
   return (

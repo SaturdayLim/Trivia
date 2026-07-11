@@ -27,7 +27,7 @@ import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { Banner, Button, Card, Connecting, ErrorScreen, RoomCode, Screen, TextInput } from '../components/ui.jsx';
 import { Lobby } from '../components/Lobby.jsx';
 import { useLobby, useRoom } from '../app/useRoom.js';
-import { useCatalog, useExposure } from '../app/useCatalog.js';
+import { useCatalog, useExposure, useGameDefaults } from '../app/useCatalog.js';
 import { ROLE } from '../app/driver.js';
 import { forgetRoom, loadHostPin, saveHostPin } from '../app/identity.js';
 import { HOST_NAME } from '../app/createRoom.js';
@@ -110,6 +110,7 @@ export default function Host() {
   const lobby = useLobby(room, roster);
   const catalog = useCatalog();
   const exposure = useExposure();
+  const gameDefaults = useGameDefaults();
 
   const [showPin, setShowPin] = useState(Boolean(location.state?.justCreated));
   const [claimError, setClaimError] = useState(null);
@@ -184,13 +185,21 @@ export default function Host() {
     setView('stages');
   }
 
-  // A freshly created Game has no Categories, so its Host starts in the wizard.
-  // One-shot: once they have been routed, `view` is theirs to drive.
+  // A freshly created Game has no Categories, so its Host starts in the
+  // wizard. One-shot: once they have been routed, `view` is theirs to drive.
+  // R8: that first landing preselects the Quickstart ten (still fully
+  // editable) rather than an empty grid — waiting one tick for the preset to
+  // load rather than opening to nothing and repopulating under the Host.
   useEffect(() => {
     if (!seated || routed.current || status !== 'lobby' || !room) return;
+    if (chosenCategories.length === 0 && gameDefaults.loading) return;
     routed.current = true;
-    if (chosenCategories.length === 0) openCategories();
-  }, [seated, status, chosenCategories, room]);
+    if (chosenCategories.length === 0) {
+      setDraftCats({ selected: gameDefaults.slugs, tierSizes: {} });
+      setError(null);
+      setView('categories');
+    }
+  }, [seated, status, chosenCategories, room, gameDefaults.loading, gameDefaults.slugs]);
 
   async function handlePinSubmit(pin) {
     setClaiming(true);

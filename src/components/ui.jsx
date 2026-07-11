@@ -14,15 +14,84 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
-/** Full-bleed night canvas. `center` for entry/join screens, off for lobbies. */
+/**
+ * Full-bleed night canvas. `center` for entry/join screens, off for lobbies.
+ *
+ * `animate-stack-in` (V2-25) is what makes screen-to-screen navigation an
+ * eased fade-and-rise instead of a hard cut: every top-level screen mounts
+ * through `Screen`, and a fresh mount is exactly when React re-plays a CSS
+ * animation. Nothing here delays when a screen appears, only how it looks
+ * doing it — `prefers-reduced-motion` collapses it to instant (index.css).
+ */
 export function Screen({ children, center = false, className = '' }) {
   return (
     <div
-      className={`min-h-screen w-full text-white ${center ? 'flex flex-col items-center justify-center' : ''} ${className}`}
+      className={`animate-stack-in min-h-screen w-full text-white ${center ? 'flex flex-col items-center justify-center' : ''} ${className}`}
       style={{ background: 'var(--stack-bg)' }}
     >
       {children}
     </div>
+  );
+}
+
+/**
+ * The click-in (?) tooltip (v1 defect #3: "Unexplained headers … no
+ * definitions"). Tap to open, tap again / tap outside / Escape to close —
+ * deliberately not hover, which does not exist on the phones this app is
+ * mobile-first for.
+ *
+ * The glyph stays visually small (it sits inline with a label) but its tap
+ * target does not: the invisible `-inset-3` extends the hit area to the
+ * PRD §6 44px floor without inflating the layout.
+ *
+ * @param {Object} props
+ * @param {string} props.text
+ * @param {string} [props.label] - accessible name for the toggle button.
+ */
+export function Tooltip({ text, label = 'What does this mean?' }) {
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onKey = (e) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open]);
+
+  return (
+    <span className="relative ml-1 inline-flex">
+      <button
+        type="button"
+        aria-label={label}
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className="relative inline-flex size-5 shrink-0 items-center justify-center rounded-full border border-white/25 text-[11px] font-bold normal-case text-white/50 hover:border-white/50 hover:text-white/80"
+      >
+        <span className="absolute -inset-3" aria-hidden="true" />
+        ?
+      </button>
+
+      {open && (
+        <>
+          {/* Absorbs the outside tap; unlike `Select` this one SHOULD dismiss
+              on it — a definition is a glance, not a decision. */}
+          <button
+            type="button"
+            aria-label="Close"
+            onClick={() => setOpen(false)}
+            className="fixed inset-0 z-40 cursor-default"
+          />
+          <span
+            role="tooltip"
+            className="animate-stack-pop absolute left-0 top-full z-50 mt-2 w-64 max-w-[75vw] rounded-xl border border-white/15 bg-[#14161c] p-3 text-left text-xs font-normal normal-case leading-relaxed text-white/70 shadow-xl"
+          >
+            {text}
+          </span>
+        </>
+      )}
+    </span>
   );
 }
 
@@ -130,7 +199,7 @@ export function Connecting({ label = 'Joining the Game' }) {
  * @param {string} [props.label]
  * @param {string} [props.suffix] - e.g. "s" for seconds.
  */
-export function NumberField({ value, onChange, min, max, label, ariaLabel, suffix, id, className = '' }) {
+export function NumberField({ value, onChange, min, max, label, ariaLabel, suffix, id, tooltip, className = '' }) {
   const [draft, setDraft] = useState(String(value));
   const focused = useRef(false);
   const name = label || ariaLabel;
@@ -158,9 +227,10 @@ export function NumberField({ value, onChange, min, max, label, ariaLabel, suffi
   return (
     <div className={className}>
       {label && (
-        <label htmlFor={id} className="mb-1.5 block text-sm text-white/60">
-          {label}
-        </label>
+        <div className="mb-1.5 flex items-center text-sm text-white/60">
+          <label htmlFor={id}>{label}</label>
+          {tooltip && <Tooltip text={tooltip} label={`What does ${label} mean?`} />}
+        </div>
       )}
       <div className="flex items-stretch gap-2">
         <button
@@ -222,10 +292,15 @@ export function NumberField({ value, onChange, min, max, label, ariaLabel, suffi
  * @param {string} props.value
  * @param {(value: string) => void} props.onChange
  */
-export function Segmented({ options, value, onChange, label, className = '' }) {
+export function Segmented({ options, value, onChange, label, tooltip, className = '' }) {
   return (
     <div className={className}>
-      {label && <span className="mb-1.5 block text-sm text-white/60">{label}</span>}
+      {label && (
+        <div className="mb-1.5 flex items-center text-sm text-white/60">
+          <span>{label}</span>
+          {tooltip && <Tooltip text={tooltip} label={`What does ${label} mean?`} />}
+        </div>
+      )}
       <div role="radiogroup" aria-label={label} className="flex gap-1 rounded-xl bg-black/40 p-1">
         {options.map((opt) => {
           const active = opt.value === value;
@@ -265,7 +340,7 @@ export function Segmented({ options, value, onChange, label, className = '' }) {
  * @param {(value: string) => void} props.onChange
  * @param {string} props.label
  */
-export function Select({ options, value, onChange, label, className = '' }) {
+export function Select({ options, value, onChange, label, tooltip, className = '' }) {
   const [open, setOpen] = useState(false);
   const panel = useRef(null);
   const current = options.find((o) => o.value === value);
@@ -285,7 +360,12 @@ export function Select({ options, value, onChange, label, className = '' }) {
 
   return (
     <div className={className}>
-      {label && <span className="mb-1.5 block text-sm text-white/60">{label}</span>}
+      {label && (
+        <div className="mb-1.5 flex items-center text-sm text-white/60">
+          <span>{label}</span>
+          {tooltip && <Tooltip text={tooltip} label={`What does ${label} mean?`} />}
+        </div>
+      )}
       <button
         type="button"
         aria-haspopup="listbox"
@@ -308,7 +388,7 @@ export function Select({ options, value, onChange, label, className = '' }) {
             role="listbox"
             aria-label={label}
             tabIndex={-1}
-            className="relative w-full max-w-sm rounded-2xl border border-white/15 bg-[#14161c] p-2 outline-none"
+            className="animate-stack-pop relative w-full max-w-sm rounded-2xl border border-white/15 bg-[#14161c] p-2 outline-none"
           >
             <p className="px-3 py-2 text-sm text-white/40">{label}</p>
             {options.map((opt) => (
@@ -370,7 +450,7 @@ export function Sheet({ title, onClose, children }) {
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="relative flex max-h-[85vh] w-full max-w-lg flex-col rounded-t-2xl border border-white/15 bg-[#14161c] sm:rounded-2xl"
+        className="animate-stack-pop relative flex max-h-[85vh] w-full max-w-lg flex-col rounded-t-2xl border border-white/15 bg-[#14161c] sm:rounded-2xl"
       >
         <header className="flex items-center justify-between border-b border-white/10 px-5 py-4">
           <h2 className="text-lg font-semibold">{title}</h2>

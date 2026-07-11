@@ -5,9 +5,69 @@
   --stack-accent: #ffe600;
 }
 
+/*
+ * Saturday Solutions family (PRD §7): playful-but-clean, legible at TV
+ * distance on the Display. Fredoka carries headings, Nunito carries body copy
+ * — the same pairing v1's game-show pass (commit a69826b) landed on, kept for
+ * v2 rather than re-litigated. Registering them as `--font-*` theme vars also
+ * exposes `font-display`/`font-sans` Tailwind utilities for the few spots
+ * (BigLetter, RoomCode) that want the mono/display treatment explicitly.
+ */
+@theme {
+  --font-sans: 'Nunito', system-ui, 'Segoe UI', Roboto, sans-serif;
+  --font-display: 'Fredoka', 'Nunito', system-ui, sans-serif;
+}
+
 body {
   margin: 0;
   background: var(--stack-bg);
   color: #fff;
-  font-family: system-ui, 'Segoe UI', Roboto, sans-serif;
+  font-family: var(--font-sans);
+}
+
+h1, h2, h3 {
+  font-family: var(--font-display);
+  letter-spacing: -0.01em;
+}
+
+/*
+ * Motion (V2-25): eased, intentional transitions on state changes — screens,
+ * scores, timer, reveal — never a hard cut. These are presentation-only: they
+ * animate what the authority effects in HostGame.jsx already decided, never
+ * the decision itself, so LOCK_GRACE_MS and friends are untouched by any of
+ * this (see S4 REVIEW's note to S5).
+ */
+@keyframes stack-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes stack-pop {
+  from { opacity: 0; transform: scale(0.85); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes stack-flash {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.04); }
+  100% { transform: scale(1); }
+}
+
+@keyframes stack-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.animate-stack-in { animation: stack-in 260ms ease-out both; }
+.animate-stack-pop { animation: stack-pop 320ms cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+.animate-stack-flash { animation: stack-flash 420ms ease-out; }
+.animate-stack-urgent { animation: stack-pulse 1s ease-in-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
 }

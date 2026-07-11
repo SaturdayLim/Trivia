@@ -80,14 +80,20 @@ export default function PlayGame({ sync, room, roomCode, clientId, teamId, onExi
   }, [g.ref]);
 
   // --- The auto-lock (V2-15). ----------------------------------------------
+  // Keyed on `g.deadline`, not `g.ref`: a Host's Extend (R2) reopens the SAME
+  // question with a NEW deadline, and clears the stale locks that caused
+  // Extend to look inert (see actions.openQuestion). If this guard stayed
+  // keyed on `ref`, a Player who was already auto-locked once for this
+  // question would never get a second chance to auto-lock in the extended
+  // window — their still-pending choice would silently vanish instead.
   useEffect(() => {
     if (!sync || g.qState !== 'open' || !g.deadline) return undefined;
     if (!me.mayAnswer || me.hasLocked || !pending) return undefined;
-    if (autoLocked.current === g.ref) return undefined;
+    if (autoLocked.current === g.deadline) return undefined;
 
     const wait = Math.max(0, g.deadline - serverNow());
     const id = setTimeout(() => {
-      autoLocked.current = g.ref;
+      autoLocked.current = g.deadline;
       // `serverNow()` here is at-or-after the deadline, which is exactly what
       // tells the Host this was an expiry lock and not an explicit Lock In —
       // so it must not seal the question on the other Teams.
@@ -300,14 +306,19 @@ export default function PlayGame({ sync, room, roomCode, clientId, teamId, onExi
         )}
       </div>
 
-      {!me.mayAnswer && !revealing && (
-        <Banner>Only {g.activeTeamName} may answer this Stage. Watch along.</Banner>
-      )}
-      {g.qState === 'selecting' && me.mayAnswer && (
+      {/* R5: the copy branches on answer-eligibility (`me.mayAnswer`), not on
+          lock state. A Team that was never eligible to answer isn't told
+          "no answer" once time is up — of course they didn't answer, they
+          couldn't — they just see that time is up. The fuller "no answer"
+          caveat is for a Team that COULD have answered and didn't. */}
+      {me.mayAnswer && g.qState === 'selecting' && (
         <Banner>Get ready. The options open when the Host starts the timer.</Banner>
       )}
-      {me.missedIt && !revealing && (
+      {me.mayAnswer && me.missedIt && !revealing && (
         <Banner tone="warn">Time is up. No answer from {me.teamName} — no points, and no penalty.</Banner>
+      )}
+      {!me.mayAnswer && !revealing && (
+        <Banner>{me.missedIt ? 'Time is up.' : `Only ${g.activeTeamName} may answer this Stage. Watch along.`}</Banner>
       )}
 
       <Options

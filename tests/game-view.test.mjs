@@ -8,7 +8,7 @@ import assert from 'node:assert';
 import { test } from 'vitest';
 import {
   LOCK_GRACE_MS,
-  cycleDelta,
+  deltaForSign,
   difficultyOf,
   hasExplicitLock,
   initialDeltas,
@@ -19,6 +19,7 @@ import {
   secondsLeft,
   selectGame,
   selectMe,
+  signOfDelta,
   standings,
   tierCounts,
   valueOf,
@@ -196,19 +197,26 @@ test('the Host seals an expired question only after the grace window', () => {
   assert.ok(!pastGrace(0, 9e9), 'an untimed Stage never expires on its own');
 });
 
-test('the Host cycles a Team through Plus, Nothing and Minus (V2-11)', () => {
-  assert.equal(cycleDelta(2, 2), 0);
-  assert.equal(cycleDelta(0, 2), -2);
-  assert.equal(cycleDelta(-2, 2), 2);
+test('a Team\'s points resolve to one of Plus, Nothing or Minus (V2-11, R3)', () => {
+  assert.equal(signOfDelta(2), 'plus');
+  assert.equal(signOfDelta(0), 'nil');
+  assert.equal(signOfDelta(-2), 'minus');
+
+  assert.equal(deltaForSign('plus', 2), 2);
+  assert.equal(deltaForSign('nil', 2), 0);
+  assert.equal(deltaForSign('minus', 2), -2);
 
   // Pre-filled from what the engine scored, with every Team present.
   const q = question({ state: 'revealed', result: { correct: 'A', deltas: { t1: 2 } } });
   assert.deepEqual(initialDeltas(q, ['t1', 't2']), { t1: 2, t2: 0 });
   assert.deepEqual(initialDeltas(null, ['t1']), { t1: 0 });
 
-  // A Host awarding a verbal answer gets the full question value, and a
-  // second tap takes it away again — V2-12 fixes the penalty at the same size.
-  assert.equal(cycleDelta(cycleDelta(0, 3), 3), 3);
+  // A Host awarding a verbal answer gets the full question value, and picking
+  // Minus for it takes away the same magnitude — V2-12 fixes the penalty at
+  // the same size, never a fraction of it.
+  assert.equal(deltaForSign('plus', 3), 3);
+  assert.equal(deltaForSign('minus', 3), -3);
+  assert.equal(signOfDelta(deltaForSign('plus', 3)), 'plus');
 });
 
 test('standings rank by score, ties by registration order (V2-10)', () => {
@@ -233,7 +241,24 @@ test('a Question Log row carries only what the wire carries', () => {
   assert.equal(row.categoryName, 'Movie Night');
   assert.equal(row.difficulty.label, 'Hard');
   assert.deepEqual(row.scores, [{ teamId: 't1', name: 'Alpha', delta: 3 }], 'zero deltas are not "scores"');
+  assert.equal(row.selectedBy, null, 'an entry from before R4 names nobody, rather than crashing');
 
   // An unknown Category degrades to its slug rather than to "undefined".
   assert.equal(logRow({ ref: 'ghosts:E1', round: 0, deltas: {} }, room).categoryName, 'ghosts');
+});
+
+test('a Question Log row names who selected the question (R4, PRD §8b)', () => {
+  const room = makeRoom();
+  const row = logRow(
+    { ref: 'movies:M1', round: 0, deltas: {}, at: 1, selectedBy: { playerId: 'p1', teamId: 't1' } },
+    room
+  );
+  assert.deepEqual(row.selectedBy, { name: 'Ann', team: 'Alpha' });
+
+  // A selector with no team on record still names the player.
+  const solo = logRow(
+    { ref: 'movies:M1', round: 0, deltas: {}, at: 1, selectedBy: { playerId: 'p1', teamId: null } },
+    room
+  );
+  assert.deepEqual(solo.selectedBy, { name: 'Ann', team: null });
 });

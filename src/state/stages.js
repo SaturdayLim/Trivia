@@ -67,6 +67,21 @@ export const PENALTIES = [
   { value: 'on', label: 'On' },
 ];
 
+/**
+ * Click-in tooltip copy for Stage-setup headers (v1 defect #3). Kept beside
+ * the fields they describe rather than duplicated at each call site — Host
+ * setup and the read-only Stage Settings peripheral both draw from this.
+ */
+export const FIELD_HELP = {
+  rotations: 'How many times this Stage goes around the table — one turn per Team, in order.',
+  timerSec: 'How many seconds Contestants get to Lock In once the Host starts the question. 0 means no timer.',
+  multiplier: "This Stage's point values (1 Easy · 2 Medium · 3 Hard) are multiplied by this number.",
+  penalty: 'When On, a wrong Lock In subtracts the question’s value instead of scoring zero. No answer is never penalized.',
+  orderMode: 'Which Team takes the very first turn of this Stage: Registration order, whoever is winning, or whoever is behind.',
+  orderModeNext: 'After the first turn, which Team gets each next turn. Ties always break by Registration order.',
+  tierSize: 'How many Easy, Medium and Hard questions each Category puts on the board. A Category with fewer than this contributes what it has.',
+};
+
 const CONTESTANTS_TO_MODE = { selector: 'exclusive', all: 'community' };
 const MODE_TO_CONTESTANTS = { exclusive: 'selector', community: 'all', suddendeath: 'all', contest: 'all' };
 

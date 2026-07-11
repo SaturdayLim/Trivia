@@ -145,6 +145,23 @@ Typography/motion: prioritize legibility at TV distance on Display; playful-but-
 | 9 | Numeric fields arrow-key only | Direct typing works on all numeric inputs |
 | 10 | Player cannot join after room creation | Join works from lobby through entire game (incl. mid-game, V2-13) |
 
+## 8b. v2.1 register — smoke-test findings (Michael, 2026-07-10, MUST-FIX before game night)
+
+From the first real multi-tab playthrough. B = bug, E = enhancement. All in scope for
+the S4.6 bugfix sprint (before/with S5); acceptance = the described behavior on Display,
+Host and Player screens.
+
+| # | Type | Finding | Required behavior |
+|---|---|---|---|
+| R1 | B | Locked answer not shown on Display | Once a team's answer is locked, the Display highlights the locked option letter (pre-reveal). Safe by design: in ALL-contestant stages a lock zeroes the timer and locks everyone (V2-15), so nothing can be copied. |
+| R2 | B | Host "Extend Timer" button does nothing | Extend re-opens options and restarts countdown per V2-15. Diagnose root cause (state guard? deadline write?) — do not paper over. |
+| R3 | E | Delta control: tap-to-cycle is clumsy | Replace with a 3-state flick/segmented control showing `+ / 0 / −` simultaneously; one tap selects the state. Values remain ±question value × multiplier (V2-11), pre-filled by auto-scoring. |
+| R4 | E | Question log lacks selector | Log rows show who selected (player name + team) alongside category/difficulty/deltas. |
+| R5 | E | Wrong timeout copy for non-contestants | Players not eligible to answer see "Time is up" only — no "No answer" caveat (that framing is for eligible players who did not lock). |
+| R6 | E | No end-of-game screen | Add a Final Results page: final standings on all three roles when status=ended (Display gets the podium treatment; motion polish can wait for S5). |
+| R7 | E | "Show QR Code" is Host-only | Host toggling Show QR also switches the Display to show the QR + room code (and back). |
+| R8 | E | Quickstart preset | HostSetup pre-selects the game-night ten on room creation (editable): 2000s Pop, Desserts, Etymology, Flags, Inventions, Legends, Marvel, Memes, Ocean, Place Names. Wire from `public/questions/game-defaults.json` (v1 decision #32 — same ten, already shipped). |
+
 ## 9. Build plan & agent delegation
 
 Per STANDING-ORDERS: Sonnet for well-specified execution, Opus for complex phases,
@@ -158,6 +175,7 @@ PROGRESS.md. Suggested phases:
 | 2 | State schema changes: exposure tree, host PIN, lifecycle/expiry, selection claim; migrate used-legacy.json | Opus |
 | 3 | Screens: shell + lobby + join flows (defect #1, #10 first) | Opus |
 | 4 | Host live loop + stage setup UI; Player selector/lock-in; Display views | Opus, then Sonnet polish |
+| 4.6 | Bugfix sprint: v2.1 register R1–R8 (§8b) — priority over S5 for game night | Sonnet |
 | 5 | Design pass: Solutions suite, tooltips, copy standardization, defect sweep #2–#9 | Sonnet |
 | 6 | Cross-device live test protocol + fixes; cutover master→v2; hub links.json entry | Sonnet + Michael |
 | — | Stack logo design | Separate task (Fable-supervised; agents weak here historically) |

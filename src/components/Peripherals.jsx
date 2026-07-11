@@ -9,7 +9,7 @@
  * grow a Close Room button by accident.
  */
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button, Card, RoomCode, Sheet } from './ui.jsx';
 import { ScoreList } from './game.jsx';
 import { QrCode, joinUrl } from './QrCode.jsx';
@@ -66,6 +66,12 @@ function LogSheet({ room, onClose }) {
                 <span className="font-semibold">{row.categoryName}</span>
                 <span className="ml-auto text-xs text-white/40">Stage {row.stageNumber}</span>
               </div>
+              {row.selectedBy && (
+                <p className="mt-0.5 text-xs text-white/40">
+                  Selected by {row.selectedBy.name}
+                  {row.selectedBy.team ? ` · ${row.selectedBy.team}` : ''}
+                </p>
+              )}
               {row.scores.length === 0 ? (
                 <p className="mt-1 text-sm text-white/40">No points scored.</p>
               ) : (
@@ -220,10 +226,26 @@ function QrSheet({ roomCode, onClose }) {
  * @param {() => void} [props.host.onEditStages]
  * @param {() => void} [props.host.onReturnHome]
  * @param {() => void} [props.host.onCloseRoom]
+ * @param {(active: boolean) => void} [props.host.onShowQr] - R7: fires
+ *   whenever the Host's own QR sheet opens/closes, so every Display can
+ *   mirror it.
  */
 export function Peripherals({ room, roomCode, host = null }) {
   const [open, setOpen] = useState(null);
   const close = () => setOpen(null);
+
+  // R7: keep the synced "Show QR Code" flag in lockstep with the sheet,
+  // however it closes — the backdrop/Escape/× paths on `Sheet`, or switching
+  // straight to a different tab — not just its own button. `hostRef` holds
+  // the latest handler without putting `host` (a fresh object every render)
+  // in the effect's deps, which would otherwise re-fire — and re-write the
+  // synced flag — on every unrelated re-render.
+  const hostRef = useRef(host);
+  hostRef.current = host;
+  useEffect(() => {
+    if (!hostRef.current || !hostRef.current.onShowQr) return;
+    hostRef.current.onShowQr(open === 'qr');
+  }, [open]);
 
   return (
     <>

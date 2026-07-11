@@ -131,22 +131,24 @@ test('a whole turn, clicked through the real screens (S4 done-when, headless)', 
   });
 
   // The toggles are pre-filled by auto-scoring: Medium is worth 2 (V2-11).
-  await waitFor(() => expect(H.getByRole('button', { name: /Alpha\s*\+2/ })).toBeTruthy());
+  // R3: a 3-state Plus/Nothing/Minus control, not a tap-to-cycle button.
+  await waitFor(() => expect(H.getByRole('radio', { name: 'Alpha: Plus', checked: true })).toBeTruthy());
   await waitFor(() => expect(Ann.getByText('Correct.')).toBeTruthy());
   await waitFor(() => expect(Tv.getByText(/\+2/)).toBeTruthy());
 
-  // The Host can overrule it before committing: + -> nil -> minus -> plus.
+  // The Host can overrule it before committing: Plus -> Nothing -> Minus -> Plus.
   await act(async () => {
-    fireEvent.click(H.getByRole('button', { name: /Alpha\s*\+2/ }));
+    fireEvent.click(H.getByRole('radio', { name: 'Alpha: Nothing' }));
   });
-  expect(H.getByRole('button', { name: /Alpha\s*0/ })).toBeTruthy();
+  expect(H.getByRole('radio', { name: 'Alpha: Nothing', checked: true })).toBeTruthy();
   await act(async () => {
-    fireEvent.click(H.getByRole('button', { name: /Alpha\s*0/ }));
+    fireEvent.click(H.getByRole('radio', { name: 'Alpha: Minus' }));
   });
+  expect(H.getByRole('radio', { name: 'Alpha: Minus', checked: true })).toBeTruthy();
   await act(async () => {
-    fireEvent.click(H.getByRole('button', { name: /Alpha\s*-2/ }));
+    fireEvent.click(H.getByRole('radio', { name: 'Alpha: Plus' }));
   });
-  expect(H.getByRole('button', { name: /Alpha\s*\+2/ })).toBeTruthy();
+  expect(H.getByRole('radio', { name: 'Alpha: Plus', checked: true })).toBeTruthy();
 
   // --- Host presses Update: scores commit, every screen returns Home. --------
   await act(async () => {
@@ -163,6 +165,8 @@ test('a whole turn, clicked through the real screens (S4 done-when, headless)', 
   expect(tree.selectionClaim).toBeUndefined();
   expect(tree.game.log.length).toBe(1);
   expect(tree.game.log[0].ref).toBe('movies:M1');
+  // R4: the Question Log remembers who selected it.
+  expect(tree.game.log[0].selectedBy).toEqual({ playerId: 'p1', teamId: 't1' });
 
   // Exposure was written at reveal (PRD §4), into the offline backend (V2-21).
   const exposed = JSON.parse(localStorage.getItem('stack-exposure') || '{}');

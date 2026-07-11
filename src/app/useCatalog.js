@@ -10,7 +10,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { loadCatalog } from '../content/catalog.js';
+import { loadCatalog, loadGameDefaults } from '../content/catalog.js';
 import { createExposureStore } from '../state/exposure.js';
 import { loadExposureBackend } from './driver.js';
 
@@ -31,6 +31,27 @@ export function useCatalog() {
       .catch((error) => {
         if (!cancelled) setState({ categories: [], parseErrors: [], loading: false, error });
       });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return state;
+}
+
+/**
+ * The Quickstart preset (R8, PRD §8b): fetched once, so Host.jsx's
+ * first-time-setup routing can wait for it before opening the Category step.
+ * @returns {{slugs: string[], loading: boolean}}
+ */
+export function useGameDefaults() {
+  const [state, setState] = useState({ slugs: [], loading: true });
+
+  useEffect(() => {
+    let cancelled = false;
+    loadGameDefaults().then((slugs) => {
+      if (!cancelled) setState({ slugs, loading: false });
+    });
     return () => {
       cancelled = true;
     };

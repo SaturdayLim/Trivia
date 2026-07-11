@@ -92,6 +92,25 @@ export function findQuestion(categories, ref) {
   return cat.questions.find((q) => q.id === id) || null;
 }
 
+/**
+ * The Quickstart preset (R8, PRD §8b): the fixed ten Categories a brand-new
+ * room's Category step preselects, still fully editable — v1 decision #32's
+ * board, already shipped as `public/questions/game-defaults.json`. Degrades
+ * to no preselection if the file is missing or malformed, same posture as
+ * `loadIconManifest`: Setup must never be blocked by a missing static file.
+ * @returns {Promise<string[]>}
+ */
+export async function loadGameDefaults() {
+  try {
+    const res = await fetch('/questions/game-defaults.json');
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data.categories) ? data.categories.filter((s) => typeof s === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
 /** Module-level cache: the bank is static, and StrictMode mounts twice. */
 let catalogPromise = null;
 

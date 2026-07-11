@@ -13,12 +13,13 @@
  */
 
 import { useMemo, useState } from 'react';
-import { Banner, Button, Card, NumberField, Screen, Segmented, Select, TextInput } from '../components/ui.jsx';
+import { Banner, Button, Card, NumberField, Screen, Segmented, Select, TextInput, Tooltip } from '../components/ui.jsx';
 import { CategoryGrid } from '../components/game.jsx';
 import { withAvailability } from '../content/catalog.js';
 import {
   CONTESTANTS,
   DEFAULT_TIER_SIZE,
+  FIELD_HELP,
   LIMITS,
   ORDER_MODES,
   PENALTIES,
@@ -140,7 +141,10 @@ export function CategorySelect({ catalog, exposure, selected, tierSizes, onChang
 
         {selectedCats.length > 0 && (
           <Card>
-            <h2 className="mb-1 font-semibold">Questions per Tier</h2>
+            <h2 className="mb-1 flex items-center font-semibold">
+              Questions per Tier
+              <Tooltip text={FIELD_HELP.tierSize} label="What does Questions per Tier mean?" />
+            </h2>
             <p className="mb-4 text-sm text-white/50">
               How many Easy, Medium and Hard questions each Category puts on the board. A Category with fewer than
               this contributes what it has.
@@ -205,6 +209,7 @@ function StageCard({ index, stage, teamCount, onChange }) {
           <NumberField
             id={`rotations-${index}`}
             label="Rotations"
+            tooltip={FIELD_HELP.rotations}
             value={stage.rotations}
             min={LIMITS.rotations.min}
             max={LIMITS.rotations.max}
@@ -213,6 +218,7 @@ function StageCard({ index, stage, teamCount, onChange }) {
           <NumberField
             id={`timer-${index}`}
             label="Thinking Time"
+            tooltip={FIELD_HELP.timerSec}
             value={stage.timerSec}
             min={LIMITS.timerSec.min}
             max={LIMITS.timerSec.max}
@@ -222,6 +228,7 @@ function StageCard({ index, stage, teamCount, onChange }) {
           <NumberField
             id={`multiplier-${index}`}
             label="Multiplier"
+            tooltip={FIELD_HELP.multiplier}
             value={stage.multiplier}
             min={LIMITS.multiplier.min}
             max={LIMITS.multiplier.max}
@@ -229,6 +236,7 @@ function StageCard({ index, stage, teamCount, onChange }) {
           />
           <Segmented
             label="Penalty"
+            tooltip={FIELD_HELP.penalty}
             options={PENALTIES}
             value={stage.penalty}
             onChange={(v) => set({ penalty: v })}
@@ -248,12 +256,14 @@ function StageCard({ index, stage, teamCount, onChange }) {
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Select
             label="Who Selects First"
+            tooltip={FIELD_HELP.orderMode}
             options={ORDER_MODES}
             value={stage.orderMode}
             onChange={(v) => set({ orderMode: v })}
           />
           <Select
             label="Who Selects Next"
+            tooltip={FIELD_HELP.orderModeNext}
             options={ORDER_MODES}
             value={stage.orderModeNext}
             onChange={(v) => set({ orderModeNext: v })}
