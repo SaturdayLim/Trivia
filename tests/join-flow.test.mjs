@@ -277,3 +277,80 @@ test('a closed Room refuses new Players on every screen', async () => {
   const { canJoin } = await import('../src/state/lobby.js');
   assert.deepEqual(canJoin(read(late, '/')), { allowed: false, reason: 'room-closed' });
 });
+
+// --- R9: a Team switch must not double-count the Player (PRD §8b) ----------
+
+test('switching Teams in the lobby removes the Player from their old roster, and deletes it once empty (R9)', async () => {
+  const code = freshCode();
+  const host = await tab(code, 'gm1', 'gm', true);
+  await A.createRoomState(host, 'gm', { clientId: 'gm1', hostPin: '1234', teams: [] });
+
+  const p1 = await tab(code, 'p1', 'player');
+  await A.createTeam(p1, { teamId: 'alpha', name: 'Alpha', color: '#111', order: 0, playerId: 'p1', playerName: 'Ann' });
+  await until(() => selectLobby(read(host, '/'), rosterOf('p1')).teams.length === 1);
+
+  // Ann was the whole of Alpha; creating Bravo instead is a switch, not an
+  // addition. Mirrors the real repro: Back in the lobby, then create/join.
+  const switched = await A.createTeam(p1, { teamId: 'bravo', name: 'Bravo', color: '#222', order: 1, playerId: 'p1', playerName: 'Ann' });
+  assert.equal(switched.committed, true);
+
+  await until(() => selectLobby(read(host, '/'), rosterOf('p1')).teams.length === 1);
+  const lobby = selectLobby(read(host, '/'), rosterOf('p1'));
+  assert.deepEqual(lobby.teams.map((t) => t.name), ['Bravo'], 'Alpha is gone entirely, not just emptied');
+  assert.equal(lobby.playerCount, 1, 'Ann is counted once, not twice');
+  assert.equal(read(host, 'clients/p1/teamId'), 'bravo');
+  assert.equal(read(host, 'teams/alpha'), undefined, 'the abandoned Team node itself is gone, not merely empty');
+});
+
+test('a Team with a Player remaining survives a teammate switching away (R9)', async () => {
+  const code = freshCode();
+  const host = await tab(code, 'gm1', 'gm', true);
+  await A.createRoomState(host, 'gm', { clientId: 'gm1', hostPin: '1234', teams: [] });
+
+  const p1 = await tab(code, 'p1', 'player');
+  await A.createTeam(p1, { teamId: 'alpha', name: 'Alpha', color: '#111', order: 0, playerId: 'p1', playerName: 'Ann' });
+  const p2 = await tab(code, 'p2', 'player');
+  await A.joinTeam(p2, { teamId: 'alpha', playerId: 'p2', playerName: 'Bea' });
+  await until(() => (selectLobby(read(host, '/'), rosterOf('p1', 'p2')).teams[0]?.players.length ?? 0) === 2);
+
+  // Bea switches to a fresh Team; Alpha still has Ann on it.
+  const switched = await A.createTeam(p2, { teamId: 'bravo', name: 'Bravo', color: '#222', order: 1, playerId: 'p2', playerName: 'Bea' });
+  assert.equal(switched.committed, true);
+
+  await until(() => selectLobby(read(host, '/'), rosterOf('p1', 'p2')).teams.length === 2);
+  const lobby = selectLobby(read(host, '/'), rosterOf('p1', 'p2'));
+  const alpha = lobby.teams.find((t) => t.name === 'Alpha');
+  const bravo = lobby.teams.find((t) => t.name === 'Bravo');
+  assert.deepEqual(alpha.players.map((p) => p.name), ['Ann'], 'Alpha survives with the Player who stayed');
+  assert.deepEqual(bravo.players.map((p) => p.name), ['Bea']);
+  assert.equal(lobby.playerCount, 2, 'never double-counted, on either Team');
+});
+
+test('mid-Game, an emptied Team survives the switch — its score and turn order persist (R9)', async () => {
+  const code = freshCode();
+  const host = await tab(code, 'gm1', 'gm', true);
+  await A.createRoomState(host, 'gm', { clientId: 'gm1', hostPin: '1234', teams: [] });
+
+  const p1 = await tab(code, 'p1', 'player');
+  await A.createTeam(p1, { teamId: 'alpha', name: 'Alpha', color: '#111', order: 0, playerId: 'p1', playerName: 'Ann' });
+  const p2 = await tab(code, 'p2', 'player');
+  await A.createTeam(p2, { teamId: 'bravo', name: 'Bravo', color: '#222', order: 1, playerId: 'p2', playerName: 'Bea' });
+
+  await A.startGame(host, 'gm');
+  await host.transact('teams/alpha/score', () => 5);
+
+  // Ann is the sole Player on Alpha and switches to Bravo mid-Game — status
+  // is 'playing', so R9's deletion rule must NOT fire here.
+  const switched = await A.joinTeam(p1, { teamId: 'bravo', playerId: 'p1', playerName: 'Ann' });
+  assert.equal(switched.committed, true);
+
+  await until(() => (read(host, 'teams/bravo/players') || {}).p1 != null);
+  const room = read(host, '/');
+  assert.ok(room.teams.alpha, 'Alpha survives even at zero Players mid-Game');
+  assert.equal(Object.keys(room.teams.alpha.players || {}).length, 0, 'but Ann herself is off its roster');
+  assert.equal(room.teams.alpha.score, 5, 'its score is untouched');
+  assert.deepEqual(read(host, 'game/teamOrder'), ['alpha', 'bravo'], 'turn order is untouched too');
+
+  const lobby = selectLobby(room, rosterOf('p1', 'p2'));
+  assert.equal(lobby.playerCount, 2, 'Ann counted once, on Bravo now');
+});

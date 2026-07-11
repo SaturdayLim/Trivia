@@ -623,3 +623,57 @@ Next / blockers:
   on `firebase-rules.json` publish; tools/sync-test.html's 3-tab checklist;
   a real 2-phone + 1-display Firebase game. S6 is where all of this gets
   walked live before cutover.
+- RESOLVED (next entry): the "Working tree is UNCOMMITTED" line above was
+  committed and pushed as `b010e63` on `v2` shortly after this entry was
+  written.
+
+## S4.6-R9 2026-07-11 - Bugfix: Team switch double-counts the Player - Sonnet
+Done:
+- REPRO confirmed by reading the code before touching it: `createTeam` and
+  `joinTeam` (engine/actions.js) each wrote the Player onto their NEW Team's
+  roster but never touched their OLD one. Neither the UI nor the wire has a
+  distinct "leave" action — Back in the lobby only releases a selection/
+  tap-in claim (V2-14) — so a switch (Back -> create/join a different Team)
+  left `teams/<old>/players/<id>` sitting there forever. `selectLobby`'s
+  counts are derived straight from `teams/*` (state/lobby.js), so the ghost
+  entry double-counted the Player on every screen, permanently.
+- New `leavePreviousTeam(sync, playerId, newTeamId)`, private to actions.js,
+  called from both `createTeam` (after its team-creation transact commits)
+  and `joinTeam` (after the new-team write): reads the Player's CURRENT Team
+  off `clients/<id>/teamId`, no-ops if there isn't one or it's the Team
+  they're switching TO (retyping your own Team's name is not a switch), then
+  transacts the old Team node — delete the Player's key, and if that leaves
+  zero Players AND `meta/status === 'lobby'`, delete the Team node outright
+  (`transact` returning `null` is a real delete, per adapter.js's
+  `setAtPath`). Mid-Game the emptied Team is left in place: its `score` and
+  its seat in `game/teamOrder` are live state `scheduler.advanceTurn` still
+  expects to find, not lobby bookkeeping.
+- `status` is read once via `readPath` before the transact, matching how
+  every other cross-path guard in this file already works (`claimHost`'s
+  `hostPin`/seat check is the same shape) — not a new risk introduced here.
+- Order of writes in both callers is new-roster-first, old-roster-second, so
+  a Player is never transiently uncounted (worst case they're briefly on
+  both, which is the bug being fixed, not a new one — and it resolves within
+  the same action, not across a render).
+Deviations from PRD (if any, + why): none. R9's three required behaviors
+  (remove from old roster; delete an emptied Team only in the lobby; the
+  client record always points at the new Team) are implemented exactly as
+  specified — the last one needed no code change, since `registerClient`
+  (already called by both actions) has always written the given `teamId`
+  unconditionally.
+Vitest: 106 passed / 106 (21 files, run twice to check for flakiness — both
+  green). New in `tests/join-flow.test.mjs`: (a) a Player who was the whole
+  of their Team switches — old roster entry gone, old Team deleted, counts
+  correct; (b) a teammate remains — old Team survives with one Player; (c)
+  mid-Game switch — old Team survives at zero Players, score and
+  `game/teamOrder` both untouched. `npm run build` clean, same shape as the
+  prior entry.
+Next / blockers:
+- NOT observed in a real browser — same standing caveat as every prior
+  session; this is a jsdom+mock-driver verification, not a device pass.
+- Working tree is UNCOMMITTED pending my own commit+push this session (see
+  the instruction that started it) — expect this to be resolved by the time
+  anyone reads this entry.
+- Everything else outstanding is unchanged from S2-S4.6: exposure migration
+  blocked on `firebase-rules.json`; the sync-test.html/2-phone device passes;
+  S6 is where those get walked before cutover.

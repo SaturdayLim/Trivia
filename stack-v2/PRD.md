@@ -160,6 +160,7 @@ Host and Player screens.
 | R5 | E | Wrong timeout copy for non-contestants | Players not eligible to answer see "Time is up" only — no "No answer" caveat (that framing is for eligible players who did not lock). |
 | R6 | E | No end-of-game screen | Add a Final Results page: final standings on all three roles when status=ended (Display gets the podium treatment; motion polish can wait for S5). |
 | R7 | E | "Show QR Code" is Host-only | Host toggling Show QR also switches the Display to show the QR + room code (and back). |
+| R9 | B | Team switch double-counts the player | Moving to another team (Back → create/join) must remove the player from their previous team's roster. A team left with zero players is deleted while status=waiting (lobby); mid-game it survives (scores must persist). Lobby counts derive from rosters, so they self-correct. |
 | R8 | E | Quickstart preset | HostSetup pre-selects the game-night ten on room creation (editable): 2000s Pop, Desserts, Etymology, Flags, Inventions, Legends, Marvel, Memes, Ocean, Place Names. Wire from `public/questions/game-defaults.json` (v1 decision #32 — same ten, already shipped). |
 
 ## 9. Build plan & agent delegation

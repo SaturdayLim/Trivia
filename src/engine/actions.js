@@ -698,6 +698,47 @@ export async function registerClient(sync, { clientId, role, name, teamId = null
 }
 
 /**
+ * Remove a Player from whatever Team they were previously on (R9, PRD §8b).
+ * Shared by `createTeam` and `joinTeam`: neither the UI nor the wire has a
+ * distinct "leave" action — Back in the lobby only releases a selection/
+ * tap-in claim (V2-14), so a Team switch is a create-or-join that must ALSO
+ * clean up the roster it's leaving behind, or the Player is double-counted
+ * (`teams/<old>/players/<id>` never goes away on its own).
+ *
+ * A no-op when there is no previous Team, or the "previous" Team is the one
+ * they're switching TO (retyping your own Team's name is not a switch).
+ *
+ * A Team left with zero players is deleted while the room is still in its
+ * `lobby` — an empty tile nobody can revive is clutter, not state worth
+ * keeping, and `selectLobby`'s counts derive straight from `teams/*`, so
+ * removing the node is what makes them self-correct. Mid-Game the empty Team
+ * survives: its score and its seat in `game/teamOrder` are live game state
+ * (`scheduler.advanceTurn` still expects to find it), not lobby bookkeeping.
+ *
+ * `status` is read once, before the transact, the same way every other
+ * guard in this file reads a value it doesn't own the write-path for
+ * (`claimHost`'s `hostPin`/seat check is the same shape) — a status flip
+ * landing inside the transact's retry window is not a case this app
+ * protects against anywhere else either.
+ * @param {import('../sync/adapter.js').SyncHandle} sync
+ * @param {string} playerId
+ * @param {string} newTeamId - the Team they're joining now.
+ * @returns {Promise<void>}
+ */
+async function leavePreviousTeam(sync, playerId, newTeamId) {
+  const prevTeamId = readPath(sync, `clients/${playerId}/teamId`);
+  if (!prevTeamId || prevTeamId === newTeamId) return;
+  const status = readPath(sync, 'meta/status') || 'lobby';
+  await sync.transact(`teams/${prevTeamId}`, (cur) => {
+    if (cur == null || !cur.players || !(playerId in cur.players)) return undefined;
+    const players = { ...cur.players };
+    delete players[playerId];
+    if (Object.keys(players).length === 0 && status === 'lobby') return null;
+    return { ...cur, players };
+  });
+}
+
+/**
  * Create a team (first-write-wins on the id) and seat the creator in it.
  * Refused while registration is locked.
  * @returns {Promise<{committed: boolean, reason?: string}>}
@@ -707,7 +748,10 @@ export async function createTeam(sync, { teamId, name, color, order, playerId, p
   const { committed } = await sync.transact(`teams/${teamId}`, (cur) =>
     cur == null ? { name, color, order, score: 0, players: { [playerId]: { name: playerName } } } : undefined
   );
-  if (committed) await registerClient(sync, { clientId: playerId, role: 'player', name: playerName, teamId });
+  if (committed) {
+    await leavePreviousTeam(sync, playerId, teamId);
+    await registerClient(sync, { clientId: playerId, role: 'player', name: playerName, teamId });
+  }
   return { committed, reason: committed ? undefined : 'team-id-taken' };
 }
 
@@ -719,6 +763,7 @@ export async function joinTeam(sync, { teamId, playerId, playerName }) {
   const team = readPath(sync, `teams/${teamId}`);
   if (!team) return { committed: false, reason: 'no-such-team' };
   await sync.update(`teams/${teamId}/players/${playerId}`, { name: playerName });
+  await leavePreviousTeam(sync, playerId, teamId);
   await registerClient(sync, { clientId: playerId, role: 'player', name: playerName, teamId });
   return { committed: true };
 }
