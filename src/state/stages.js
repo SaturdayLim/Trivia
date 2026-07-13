@@ -17,12 +17,15 @@
  * So this module is the seam. Everything above it says Stage; everything below
  * it says round; the two fields the PRD adds that v1 had no name for are:
  *
- *   - **Contestants** (Selector Only / All) — is exactly v1's round `mode`,
- *     spelled `exclusive` / `community`. `contest` and `suddendeath` are not
- *     reachable from the v2 UI: contest is excluded outright (V2-9), and
- *     "sudden death" in v2 is a *configuration* (All contestants, penalty on,
- *     high multiplier), not a distinct scoring rule — `suddendeath`'s
- *     `scoreOutcome` is literally `community`'s. Both modes stay in the engine.
+ *   - **Contestants** (Selector Only / All / Fastest Fingers, V2-26) — the v2
+ *     UI writes one of three dedicated engine modes: `selectorOnly` / `all` /
+ *     `fastest` (scoring.js). These carry the trial-round scoring the register
+ *     LOCKED (R10/R13): the selecting team must answer in every mode, and a
+ *     first-to-answer race is its own mode. They are DISTINCT from v1's
+ *     `exclusive`/`community`/`contest`/`suddendeath`, which the regression
+ *     suite pins and the v2 UI never writes — a room persisted before this
+ *     change still reads back as one of the three via `contestantsOf` +
+ *     `modeFor` on the next normalize (V2-9: contest stays unsurfaced).
  *
  *   - **Who Selects Next** (V2-10) — v1 had one order rule per round, applied
  *     both to seed the round and to re-sort it each rotation. v2 splits those:
@@ -49,17 +52,27 @@ export const LIMITS = {
   tierSize: { min: 1, max: 20 },
 };
 
-/** Who may lock an answer (PRD §3.2 "Contestants"). */
+/** Who may lock an answer (PRD §3.2 "Contestants", 3-way per V2-26). */
 export const CONTESTANTS = [
   { value: 'selector', label: 'Selector Only', hint: 'Only the Team that chose the question may answer.' },
-  { value: 'all', label: 'All Teams', hint: 'Every Team answers. The first Team to Lock In ends the question.' },
+  {
+    value: 'all',
+    label: 'All',
+    hint: 'Every Team answers, but the Selector controls the end: the question closes when the Selector Locks In (or time runs out), and every other Team keeps its current selection.',
+  },
+  {
+    value: 'fastest',
+    label: 'Fastest Fingers',
+    hint: 'Every Team answers. The first Team to Lock In ends the question and scores. Teams tied on timing all score.',
+  },
 ];
 
-/** Turn-order rules (V2-10). Ties always break by registration order. */
+/** Turn-order rules (V2-10). Labels renamed per R14; values and the
+ *  registration-order tiebreak are unchanged. */
 export const ORDER_MODES = [
   { value: 'registration', label: 'Registration Order' },
-  { value: 'winnerFirst', label: 'Winner First' },
-  { value: 'loserFirst', label: 'Loser First' },
+  { value: 'winnerFirst', label: 'Winning Team' },
+  { value: 'loserFirst', label: 'Lowest Score' },
 ];
 
 export const PENALTIES = [
@@ -82,28 +95,51 @@ export const FIELD_HELP = {
   tierSize: 'How many Easy, Medium and Hard questions each Category puts on the board. A Category with fewer than this contributes what it has.',
 };
 
-const CONTESTANTS_TO_MODE = { selector: 'exclusive', all: 'community' };
-const MODE_TO_CONTESTANTS = { exclusive: 'selector', community: 'all', suddendeath: 'all', contest: 'all' };
+const CONTESTANTS_TO_MODE = { selector: 'selectorOnly', all: 'all', fastest: 'fastest' };
+const MODE_TO_CONTESTANTS = {
+  // v2 modes (V2-26) — what the UI writes now.
+  selectorOnly: 'selector',
+  all: 'all',
+  fastest: 'fastest',
+  // Legacy v1 modes: a room persisted before V2-26 carries these, and reads
+  // back as a Contestants value rather than a blank control. `normalizeStage`
+  // re-derives the v2 mode from this on the next read/write. `contest`
+  // (excluded, V2-9) and `suddendeath` both surface as "All".
+  exclusive: 'selector',
+  community: 'all',
+  suddendeath: 'all',
+  contest: 'all',
+};
 
-/** @param {'selector'|'all'} contestants @returns {'exclusive'|'community'} */
+/** @param {'selector'|'all'|'fastest'} contestants @returns {'selectorOnly'|'all'|'fastest'} */
 export function modeFor(contestants) {
-  return CONTESTANTS_TO_MODE[contestants] || 'exclusive';
+  return CONTESTANTS_TO_MODE[contestants] || 'selectorOnly';
 }
 
 /**
- * The Contestants setting behind a round's `mode`. `contest`/`suddendeath` are
- * legacy modes the v2 UI never writes; they read back as "All Teams" rather
- * than as an empty control.
+ * The Contestants setting behind a round's `mode`. Legacy modes read back as a
+ * live Contestants value rather than an empty control (see MODE_TO_CONTESTANTS).
  * @param {?{mode?: string}} round
- * @returns {'selector'|'all'}
+ * @returns {'selector'|'all'|'fastest'}
  */
 export function contestantsOf(round) {
   return MODE_TO_CONTESTANTS[round && round.mode] || 'selector';
 }
 
-/** @param {?{mode?: string}} round @returns {boolean} true when every Team answers. */
+/** @param {?{mode?: string}} round @returns {boolean} true only for the "All" mode. */
 export function isAllContest(round) {
   return contestantsOf(round) === 'all';
+}
+
+/**
+ * True when every Team may answer this Stage — both "All" and "Fastest Fingers"
+ * (V2-26), as opposed to "Selector Only". The screens branch on this to decide
+ * whether to enable non-selecting Teams' options.
+ * @param {?{mode?: string}} round
+ * @returns {boolean}
+ */
+export function everyoneAnswers(round) {
+  return contestantsOf(round) !== 'selector';
 }
 
 function label(list, value) {
@@ -116,17 +152,17 @@ export const contestantsLabel = (value) => label(CONTESTANTS, value);
 
 /**
  * The four Stages a fresh Game starts with (PRD §4: "Stage 1 intro (30s, no
- * penalty, selector-only, ×1, registration order), Stage 4 sudden death
- * (penalty, all contest, ×2–3, loser-first)"). Rotation counts follow v1's
- * DEFAULT_ROUNDS. Every field is editable in Stage setup before Begin.
+ * penalty, Selector Only, ×1, registration order), Stage 4 sudden death
+ * (penalty, Fastest Fingers, ×2–3, lowest-score first)"). Rotation counts
+ * follow v1's DEFAULT_ROUNDS. Every field is editable in Stage setup before Begin.
  * @returns {Array<Object>} RoundConfig[]
  */
 export function defaultStages() {
   return [
-    { mode: 'exclusive', rotations: 3, multiplier: 1, penalty: 'off', orderMode: 'registration', orderModeNext: 'registration', timerSec: DEFAULT_TIMER_SEC },
-    { mode: 'exclusive', rotations: 3, multiplier: 1, penalty: 'on', orderMode: 'winnerFirst', orderModeNext: 'winnerFirst', timerSec: DEFAULT_TIMER_SEC },
-    { mode: 'community', rotations: 1, multiplier: 2, penalty: 'on', orderMode: 'loserFirst', orderModeNext: 'loserFirst', timerSec: DEFAULT_TIMER_SEC },
-    { mode: 'community', rotations: 1, multiplier: 3, penalty: 'on', orderMode: 'loserFirst', orderModeNext: 'loserFirst', timerSec: DEFAULT_TIMER_SEC },
+    { mode: 'selectorOnly', rotations: 3, multiplier: 1, penalty: 'off', orderMode: 'registration', orderModeNext: 'registration', timerSec: DEFAULT_TIMER_SEC },
+    { mode: 'selectorOnly', rotations: 3, multiplier: 1, penalty: 'on', orderMode: 'winnerFirst', orderModeNext: 'winnerFirst', timerSec: DEFAULT_TIMER_SEC },
+    { mode: 'all', rotations: 1, multiplier: 2, penalty: 'on', orderMode: 'loserFirst', orderModeNext: 'loserFirst', timerSec: DEFAULT_TIMER_SEC },
+    { mode: 'fastest', rotations: 1, multiplier: 3, penalty: 'on', orderMode: 'loserFirst', orderModeNext: 'loserFirst', timerSec: DEFAULT_TIMER_SEC },
   ];
 }
 

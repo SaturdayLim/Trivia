@@ -19,5 +19,13 @@ export default defineConfig({
     // flaky, and nothing to do with the app. Separate processes give each file
     // its own channel space.
     pool: 'forks',
+    // The jsdom live-screen tests drive several React screens over the real
+    // mock driver and poll for BroadcastChannel convergence. Each completes in
+    // ~2-3s in isolation, but the suite runs its files concurrently in the forks
+    // pool, and under that CPU contention a 5s default timeout is too tight —
+    // they intermittently trip it while doing correct work. Give them headroom;
+    // a genuine hang still fails well inside this window.
+    testTimeout: 20000,
+    hookTimeout: 20000,
   },
 })

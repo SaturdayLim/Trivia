@@ -98,9 +98,11 @@ export default function DisplayGame({ room, roomCode, sync }) {
   if (g.question) {
     const revealing = (g.qState === 'revealed' || g.qState === 'scored') && Boolean(g.result);
     const meta = g.slug ? g.categoryMeta[g.slug] : null;
-    // R1: highlight every Team's locked letter pre-reveal — safe by design,
-    // since a lock already zeroes the timer and locks everyone else (V2-15).
-    const lockedLetters = Object.values(g.locks || {}).map((l) => l.choice);
+    // R11 (refines R1): pre-reveal, highlight ONLY the Selector's locked letter,
+    // never any other Team's. In "All" a non-selector's lock does not end the
+    // question (R10), so showing every lock would leak answers between Teams;
+    // showing the Selector's is the R1 feedback for the Team that controls the end.
+    const lockedLetters = g.selectorChoice ? [g.selectorChoice] : [];
 
     return (
       <Frame>
@@ -158,9 +160,11 @@ export default function DisplayGame({ room, roomCode, sync }) {
           <p className="text-center text-2xl text-white/40">
             {g.qState === 'selecting'
               ? 'Waiting for the Host to start the timer.'
-              : g.allContest
-                ? 'Every Team may answer.'
-                : `Only ${g.activeTeamName} may answer.`}
+              : g.contestants === 'fastest'
+                ? 'Fastest Fingers — the first Team to Lock In wins.'
+                : g.contestants === 'all'
+                  ? `Every Team may answer. ${g.activeTeamName} controls the finish.`
+                  : `Only ${g.activeTeamName} may answer.`}
           </p>
         )}
       </Frame>

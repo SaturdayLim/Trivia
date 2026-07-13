@@ -13,7 +13,7 @@
 import { MODES, questionValue } from '../engine/scoring.js';
 import { parseRef } from '../engine/questions.js';
 import { holdsClaim, isLockedOut } from './room.js';
-import { normalizeStage, normalizeStages, isAllContest } from './stages.js';
+import { normalizeStage, normalizeStages, contestantsOf, everyoneAnswers } from './stages.js';
 
 /** Difficulty semantics from PRD §7. Green / Yellow / Red, everywhere. */
 export const DIFFICULTIES = [
@@ -230,7 +230,10 @@ export function valueOf(room, dif) {
  * @property {Object[]} log - question log entries, newest last.
  * @property {Object} categoryMeta
  * @property {string[]} categories - slugs in play.
- * @property {boolean} allContest - every Team may answer this Stage.
+ * @property {'selector'|'all'|'fastest'} contestants - this Stage's Contestants setting.
+ * @property {boolean} allContest - every Team may answer this Stage (All or Fastest Fingers).
+ * @property {?string} selectorChoice - the selecting Team's locked letter, or
+ *   null. The Display highlights only this pre-reveal (R11).
  */
 
 /**
@@ -245,6 +248,8 @@ export function selectGame(room) {
   const stage = stageOf(room);
   const ref = question ? question.ref : null;
   const selectorId = (game.tapIn && game.tapIn.winner) || (game.selectIntent && game.selectIntent.playerId) || null;
+  const locks = (question && question.locks) || {};
+  const selectorLock = game.activeTeam ? locks[game.activeTeam] : null;
 
   return {
     status: (room && room.meta && room.meta.status) || 'lobby',
@@ -266,7 +271,7 @@ export function selectGame(room) {
     dif: difficultyOf(ref),
     value: question ? question.value : 0,
     deadline: (question && question.deadline) || 0,
-    locks: (question && question.locks) || {},
+    locks,
     result: (question && question.result) || null,
     board: game.board || {},
     claim: room ? room.selectionClaim || null : null,
@@ -275,7 +280,9 @@ export function selectGame(room) {
     log: game.log || [],
     categoryMeta: settings.categoryMeta || {},
     categories: settings.categories || [],
-    allContest: isAllContest(stage),
+    contestants: contestantsOf(stage),
+    allContest: everyoneAnswers(stage),
+    selectorChoice: selectorLock ? selectorLock.choice : null,
   };
 }
 
@@ -351,6 +358,40 @@ export function hasExplicitLock(locks, deadline) {
   if (entries.length === 0) return false;
   if (!deadline) return true;
   return entries.some((lock) => typeof lock.at === 'number' && lock.at < deadline);
+}
+
+/** Is one specific lock an explicit Lock In (before the deadline)? */
+function lockIsExplicit(lock, deadline) {
+  if (!lock) return false;
+  return !deadline || (typeof lock.at === 'number' && lock.at < deadline);
+}
+
+/**
+ * Which end-of-question mechanism an explicit Lock In should trigger under this
+ * Stage's Contestants mode (V2-15/V2-26). The Host authority loop calls this to
+ * decide whether to seal the question now or pull the timer in.
+ *
+ *   - `'seal'` — seal the question immediately. Selector Only (the selector's
+ *      lock) and Fastest Fingers (the first Team's lock, R13) both end on the
+ *      spot; nobody else's pending selection is captured.
+ *   - `'pull'` — "All" mode (R10): ONLY the *Selector's* explicit lock ends it,
+ *      and it does so by pulling the deadline in, so every other Team's pending
+ *      selection auto-locks (V2-15) before the seal. A non-selecting Team's lock
+ *      does NOT end the question — it only locks that Team.
+ *   - `null`   — no explicit lock has ended the question yet.
+ *
+ * @param {Object} p
+ * @param {Object<string, Object>} p.locks
+ * @param {number} p.deadline - 0 for an untimed Stage (every lock is explicit).
+ * @param {'selector'|'all'|'fastest'} p.contestants
+ * @param {?string} p.selectingTeamId
+ * @returns {'seal'|'pull'|null}
+ */
+export function lockEnding({ locks, deadline, contestants, selectingTeamId }) {
+  if (contestants === 'fastest') return hasExplicitLock(locks, deadline) ? 'seal' : null;
+  const sel = selectingTeamId && locks ? locks[selectingTeamId] : null;
+  if (!lockIsExplicit(sel, deadline)) return null;
+  return contestants === 'all' ? 'pull' : 'seal';
 }
 
 /**

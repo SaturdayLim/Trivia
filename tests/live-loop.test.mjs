@@ -14,7 +14,7 @@ import * as driverMock from '../src/sync/driver-mock.js';
 import * as A from '../src/engine/actions.js';
 import { buildBoard, drawQuestion } from '../src/engine/board.js';
 import { defaultStages, modeFor } from '../src/state/stages.js';
-import { hasExplicitLock, selectGame, selectMe } from '../src/state/game.js';
+import { hasExplicitLock, lockEnding, selectGame, selectMe } from '../src/state/game.js';
 import { createExposureStore, createMemoryExposureBackend } from '../src/state/exposure.js';
 
 beforeAll(() => {
@@ -382,4 +382,99 @@ test('a Player joining mid-Game gets a turn, and the board settings survive a re
   await hostFulfils(host);
   const refused = await A.updateBoardSettings(host, 'gm', { categories: ['space'] });
   assert.ok(!refused.committed && refused.reason === 'question-in-progress');
+});
+
+// ---------------------------------------------------------------------------
+// V2-26 end-of-question + scoring, over the real driver (R10/R13). The locks
+// here are written straight to the authoritative tree via the Host session,
+// standing in for the players' devices — the Host's own seal/pull DECISION is
+// the thing under test, and `lockEnding` is exactly what HostGame consults.
+// ---------------------------------------------------------------------------
+
+/** Fulfil one Alpha (t1) selection so a question is live and open. */
+async function openAlphaQuestion(code, host, dif, deadline) {
+  const ann = await tab(code, 'p1', 'player');
+  await A.claimSelection(ann, { playerId: 'p1', teamId: 't1', screen: 'difficulty', slug: 'movies' });
+  await A.claimTapIn(ann, 't1', 'p1');
+  await A.requestSelection(ann, { playerId: 'p1', teamId: 't1', slug: 'movies', dif });
+  await until(() => Boolean(read(host, 'game/selectIntent')));
+  const ref = await hostFulfils(host);
+  await A.openQuestion(host, 'gm', deadline);
+  await until(() => read(host, 'game/question')?.state === 'open');
+  return ref;
+}
+
+const endingNow = (host, deadline, contestants) =>
+  lockEnding({ locks: read(host, 'game/question/locks'), deadline, contestants, selectingTeamId: 't1' });
+
+test('All Stage: the Selector controls the end — a non-selector lock does not seal, the Selector lock does (R10)', async () => {
+  const stages = defaultStages().map((s) => ({ ...s, mode: modeFor('all'), rotations: 1, penalty: 'on', multiplier: 1 }));
+  const { code, host } = await seedGame({ stages, teams: TEAMS });
+  const deadline = host.serverNow() + 30_000;
+  const ref = await openAlphaQuestion(code, host, 'E', deadline); // Easy, value 1
+
+  // Bravo (non-selector) Locks In first, explicitly. In "All" this must NOT end
+  // the question — only the Selector controls the end (R10).
+  assert.ok((await A.lockAnswer(host, 't2', 'p3', 'B', host.serverNow())).committed);
+  assert.equal(endingNow(host, deadline, 'all'), null, 'a non-selector lock leaves the question open');
+  assert.equal(read(host, 'game/question/state'), 'open', 'the Host did not seal');
+
+  // The Selector Locks In: now the question ends, via the pull mechanism.
+  assert.ok((await A.lockAnswer(host, 't1', 'p1', 'A', host.serverNow())).committed);
+  assert.equal(endingNow(host, deadline, 'all'), 'pull');
+  await A.pullDeadline(host, 'gm', host.serverNow()); // what HostGame does…
+  await A.lockQuestion(host, 'gm'); // …then seals after the grace window
+
+  const rev = await A.revealQuestion(host, 'gm', findQ(ref).answer); // answer 'A'
+  assert.deepEqual(rev.deltas, { t1: 1, t2: -1 }, 'Selector right (+1), Bravo wrong and penalized (-1)');
+});
+
+test('All Stage: the Selecting Team is penalized for no answer when Penalty is On (V2-26)', async () => {
+  const stages = defaultStages().map((s) => ({ ...s, mode: modeFor('all'), rotations: 1, penalty: 'on', multiplier: 1 }));
+  const { code, host } = await seedGame({ stages, teams: TEAMS });
+  const ref = await openAlphaQuestion(code, host, 'M', host.serverNow() + 20); // Medium, value 2
+
+  // Nobody answers. The Host seals at expiry.
+  await A.lockQuestion(host, 'gm');
+  const rev = await A.revealQuestion(host, 'gm', findQ(ref).answer);
+  assert.equal(rev.deltas.t1, -2, 'the Selecting Team that never answered takes the no-answer penalty');
+  assert.equal(rev.deltas.t2, 0, 'a non-selecting silent Team is exempt');
+});
+
+test('Fastest Fingers: the first Team to answer ends it and scores; the raced Selector is not penalized (R13)', async () => {
+  const stages = defaultStages().map((s) => ({ ...s, mode: modeFor('fastest'), rotations: 1, penalty: 'on', multiplier: 1 }));
+  const { code, host } = await seedGame({ stages, teams: TEAMS });
+  const deadline = host.serverNow() + 30_000;
+  const ref = await openAlphaQuestion(code, host, 'M', deadline); // Medium, value 2
+
+  // Bravo (non-selecting) buzzes in first, correctly.
+  assert.ok((await A.lockAnswer(host, 't2', 'p3', 'A', host.serverNow())).committed);
+  assert.equal(endingNow(host, deadline, 'fastest'), 'seal', 'the first lock ends it for everyone');
+  await A.lockQuestion(host, 'gm'); // the Host seals immediately
+
+  // The Selector was too slow: it can no longer answer.
+  const late = await A.lockAnswer(host, 't1', 'p1', 'A', host.serverNow());
+  assert.ok(!late.committed && late.reason === 'not-open');
+
+  const rev = await A.revealQuestion(host, 'gm', findQ(ref).answer); // 'A'
+  assert.equal(rev.deltas.t2, 2, 'the first (correct) Team scores');
+  assert.equal(rev.deltas.t1, 0, 'the Selector was raced, not silent — no penalty (R13)');
+});
+
+test('Fastest Fingers: Teams tied on timing all score (R13)', async () => {
+  const stages = defaultStages().map((s) => ({ ...s, mode: modeFor('fastest'), rotations: 1, penalty: 'on', multiplier: 1 }));
+  const THREE = [...TEAMS, { id: 't3', name: 'Cy', color: '#333', order: 2 }];
+  const { code, host } = await seedGame({ stages, teams: THREE });
+  const ref = await openAlphaQuestion(code, host, 'E', host.serverNow() + 30_000); // Easy, value 1
+
+  // Two Teams buzz in together — both locks land before the seal.
+  const now = host.serverNow();
+  assert.ok((await A.lockAnswer(host, 't2', 'p3', 'A', now)).committed);
+  assert.ok((await A.lockAnswer(host, 't3', 'p5', 'A', now)).committed);
+  await A.lockQuestion(host, 'gm');
+
+  const rev = await A.revealQuestion(host, 'gm', findQ(ref).answer); // 'A'
+  assert.equal(rev.deltas.t2, 1);
+  assert.equal(rev.deltas.t3, 1, 'both tied Teams score (ties allowed)');
+  assert.equal(rev.deltas.t1, 0, 'the Selector did not answer, but others did — no penalty');
 });

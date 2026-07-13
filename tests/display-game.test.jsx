@@ -77,6 +77,53 @@ test('R1: locked answers are highlighted pre-reveal, safe because a lock already
   expect(highlighted[0].textContent).toContain('e-b');
 });
 
+test('R11: pre-reveal, only the SELECTOR\'s locked letter is highlighted, not another Team\'s', () => {
+  // t1 (Alpha) is the selecting Team. In an "All" Stage a non-selecting Team can
+  // lock without ending the question (R10), so showing every lock would leak
+  // answers — the Display shows the Selector's answer only (R11).
+  const room = baseRoom({
+    settings: {
+      rounds: defaultStages().map((s, i) => (i === 0 ? { ...s, mode: 'all' } : s)),
+      categories: ['movies'],
+      categoryMeta: { movies: { name: 'Movie Night', icon: null, n: 1 } },
+    },
+    game: {
+      round: 0,
+      rotation: 0,
+      teamOrder: ['t1', 't2'],
+      activeTeam: 't1',
+      board: {},
+      log: [],
+      question: {
+        ref: 'movies:E1',
+        state: 'open',
+        value: 1,
+        deadline: 1_000_500,
+        payload: { q: 'Q?', options: ['e-a', 'e-b', 'e-c', 'e-d'] },
+        // Only Bravo (a non-selector) has locked so far — 'D' / "e-d".
+        locks: { t2: { playerId: 'p3', choice: 'D', at: 999_900 } },
+        result: null,
+      },
+    },
+  });
+
+  const first = render(<DisplayGame room={room} roomCode="ABCD" sync={sync} />);
+  let highlighted = Array.from(first.container.querySelectorAll('div')).filter((el) =>
+    el.className.includes('border-[var(--stack-accent)]')
+  );
+  expect(highlighted.length).toBe(0); // Bravo's lock is NOT shown pre-reveal
+  cleanup();
+
+  // Now the Selector (t1) also locks 'B' / "e-b": that — and only that — shows.
+  room.game.question.locks.t1 = { playerId: 'p1', choice: 'B', at: 999_950 };
+  const second = render(<DisplayGame room={room} roomCode="ABCD" sync={sync} />);
+  highlighted = Array.from(second.container.querySelectorAll('div')).filter((el) =>
+    el.className.includes('border-[var(--stack-accent)]')
+  );
+  expect(highlighted.length).toBe(1);
+  expect(highlighted[0].textContent).toContain('e-b');
+});
+
 test('R6: the ended Game shows a ranked podium, not a plain list', () => {
   const room = baseRoom({ meta: { status: 'ended' } });
   room.teams = {

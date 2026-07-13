@@ -424,6 +424,25 @@ export async function openQuestion(sync, role, deadline) {
 }
 
 /**
+ * Host: pull the live question's deadline in to `deadline` WITHOUT clearing
+ * locks or changing state (R10's mechanism for "All" mode). When the Selector
+ * Locks In during an All Stage, the Host drops the timer so every OTHER Team's
+ * device auto-locks its pending selection (V2-15) before the question seals —
+ * unlike `openQuestion`, which wipes locks and would throw the Selector's own
+ * answer (and everyone else's) away. Refused unless the question is `open`.
+ * @param {import('../sync/adapter.js').SyncHandle} sync
+ * @param {string} role
+ * @param {number} deadline - epoch ms.
+ * @returns {Promise<?{deadline: number}>}
+ */
+export async function pullDeadline(sync, role, deadline) {
+  if (role !== 'gm') return null;
+  if (readPath(sync, 'game/question/state') !== 'open') return null;
+  await sync.update('game/question/deadline', deadline || 0);
+  return { deadline: deadline || 0 };
+}
+
+/**
  * Reveal the correct answer and compute (but do not yet apply) scores via
  * `scoring.MODES[roundCfg.mode].scoreOutcome`. Per PRD §4.7, used-question
  * memory is recorded when a question reaches `revealed` (not at

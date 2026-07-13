@@ -9,7 +9,7 @@
 /** @typedef {'E'|'M'|'H'} Difficulty */
 /** @typedef {'on'|'off'|'half'} PenaltyMode */
 /** @typedef {'registration'|'winnerFirst'|'loserFirst'} OrderMode */
-/** @typedef {'community'|'exclusive'|'contest'|'suddendeath'} RoundModeName */
+/** @typedef {'community'|'exclusive'|'contest'|'suddendeath'|'selectorOnly'|'all'|'fastest'} RoundModeName */
 /** @typedef {'A'|'B'|'C'|'D'} Choice */
 
 /**
@@ -149,12 +149,78 @@ function contestScoreOutcome(ctx) {
   return { deltas };
 }
 
+// ---------------------------------------------------------------------------
+// v2 Contestants modes (V2-26, trial-round R10/R13). These carry the amended
+// scoring the trial round LOCKED, and are kept separate from the four v1 modes
+// above — which the regression suite (tests/full-game.test.mjs) pins — so the
+// engine's old behaviour is untouched. In EVERY v2 mode the *selecting* team
+// must answer and takes the no-answer penalty when Penalty is On; a
+// *non-selecting* team is scored only if it answers and is penalty-exempt on
+// silence. The three modes differ only in who may answer and how the question
+// ends (enforced by the Host loop + `state/game.js`'s `lockEnding`).
+// ---------------------------------------------------------------------------
+
+/** A team that locked: +value if right, else the wrong-answer penalty (0 when Off). */
+function answeredDelta(lock, correct, value, penaltyMode) {
+  return lock.choice === correct ? value : -penaltyAmount(value, penaltyMode);
+}
+
+// Selector Only — only the selecting team may ever lock. It is the one team
+// that must answer, so its silence is the no-answer penalty; no other team scores.
+function selectorOnlyScoreOutcome(ctx) {
+  const { locks, correct, roundCfg, selectingTeamId, teamIds, value } = ctx;
+  const deltas = zeroDeltas(teamIds);
+  const sel = locks[selectingTeamId];
+  deltas[selectingTeamId] = sel
+    ? answeredDelta(sel, correct, value, roundCfg.penalty)
+    : -penaltyAmount(value, roundCfg.penalty);
+  return { deltas };
+}
+
+// All — every team may answer up to the Selector's lock-in (R10). Each locked
+// team scores; a non-selecting team that never locked is exempt (0); the
+// selecting team that never locked takes the no-answer penalty.
+function allScoreOutcome(ctx) {
+  const { locks, correct, roundCfg, selectingTeamId, teamIds, value } = ctx;
+  const deltas = zeroDeltas(teamIds);
+  for (const teamId of teamIds) {
+    const lock = locks[teamId];
+    if (lock) deltas[teamId] = answeredDelta(lock, correct, value, roundCfg.penalty);
+    else if (teamId === selectingTeamId) deltas[teamId] = -penaltyAmount(value, roundCfg.penalty);
+  }
+  return { deltas };
+}
+
+// Fastest Fingers — the first team to answer (ties allowed) ends the question;
+// every locked team is resolved. If NO team answered at all, the selecting team
+// takes the no-answer penalty (R13). If someone answered but the selector was
+// not among them, the selector is NOT penalized — it was raced, not silent.
+function fastestScoreOutcome(ctx) {
+  const { locks, correct, roundCfg, selectingTeamId, teamIds, value } = ctx;
+  const deltas = zeroDeltas(teamIds);
+  let anyLock = false;
+  for (const teamId of teamIds) {
+    const lock = locks[teamId];
+    if (lock) {
+      anyLock = true;
+      deltas[teamId] = answeredDelta(lock, correct, value, roundCfg.penalty);
+    }
+  }
+  if (!anyLock) deltas[selectingTeamId] = -penaltyAmount(value, roundCfg.penalty);
+  return { deltas };
+}
+
 /** @type {Object<RoundModeName, RoundMode>} */
 export const MODES = {
   community: { mayAnswer: allTeamsMayAnswer, scoreOutcome: allTeamsScoreOutcome },
   suddendeath: { mayAnswer: allTeamsMayAnswer, scoreOutcome: allTeamsScoreOutcome },
   exclusive: { mayAnswer: exclusiveMayAnswer, scoreOutcome: exclusiveScoreOutcome },
   contest: { mayAnswer: contestMayAnswer, scoreOutcome: contestScoreOutcome },
+  // v2 Contestants modes (V2-26). selectorOnly reuses exclusive's eligibility
+  // rule; all/fastest let every team answer.
+  selectorOnly: { mayAnswer: exclusiveMayAnswer, scoreOutcome: selectorOnlyScoreOutcome },
+  all: { mayAnswer: allTeamsMayAnswer, scoreOutcome: allScoreOutcome },
+  fastest: { mayAnswer: allTeamsMayAnswer, scoreOutcome: fastestScoreOutcome },
 };
 
 /**

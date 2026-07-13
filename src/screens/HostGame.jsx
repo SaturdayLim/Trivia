@@ -38,6 +38,7 @@ import {
   lockQuestion,
   openQuestion,
   openTapIn,
+  pullDeadline,
   revealQuestion,
   selectQuestion,
   setShowQr,
@@ -48,8 +49,8 @@ import {
   LOCK_GRACE_MS,
   OPTION_LETTERS,
   deltaForSign,
-  hasExplicitLock,
   initialDeltas,
+  lockEnding,
   pastGrace,
   selectGame,
   signOfDelta,
@@ -171,6 +172,7 @@ export default function HostGame({ sync, room, roomCode, catalog, exposure, onEd
 
   const fulfilling = useRef(null);
   const sealing = useRef(null);
+  const pulling = useRef(null);
   const deltasFor = useRef(null);
 
   const serverNow = useCallback(() => (sync ? sync.serverNow() : Date.now()), [sync]);
@@ -215,16 +217,37 @@ export default function HostGame({ sync, room, roomCode, catalog, exposure, onEd
     });
   }, [sync, room.game, g.question, g.board, catalog]);
 
-  // --- Authority effect 2: an explicit Lock In seals the question (V2-15). ---
+  // --- Authority effect 2: an explicit Lock In ends the question (V2-15/V2-26).
+  // WHICH lock ends it is mode-specific — `lockEnding` decides:
+  //   'seal' — Selector Only / Fastest Fingers: seal immediately.
+  //   'pull' — All (R10): the Selector's lock drops the timer to now, so every
+  //            other Team's device auto-locks its pending selection; authority
+  //            effect 3 then grace-seals. Guarded by its own ref so the deadline
+  //            is pulled once, not on every re-render the pulled deadline causes.
   useEffect(() => {
     if (!sync || g.qState !== 'open') return;
-    if (!hasExplicitLock(g.locks, g.deadline)) return;
-    if (sealing.current === g.ref) return;
-    sealing.current = g.ref;
-    lockQuestion(sync, ROLE.HOST).catch(() => {
-      sealing.current = null;
+    const ending = lockEnding({
+      locks: g.locks,
+      deadline: g.deadline,
+      contestants: g.contestants,
+      selectingTeamId: g.activeTeam,
     });
-  }, [sync, g.qState, g.locks, g.deadline, g.ref]);
+    if (!ending) return;
+    if (ending === 'seal') {
+      if (sealing.current === g.ref) return;
+      sealing.current = g.ref;
+      lockQuestion(sync, ROLE.HOST).catch(() => {
+        sealing.current = null;
+      });
+      return;
+    }
+    // 'pull'
+    if (pulling.current === g.ref) return;
+    pulling.current = g.ref;
+    pullDeadline(sync, ROLE.HOST, serverNow()).catch(() => {
+      pulling.current = null;
+    });
+  }, [sync, g.qState, g.locks, g.deadline, g.ref, g.contestants, g.activeTeam, serverNow]);
 
   // --- Authority effect 3: expiry, one grace window later. -------------------
   useEffect(() => {
@@ -263,6 +286,7 @@ export default function HostGame({ sync, room, roomCode, catalog, exposure, onEd
   const handleStart = guard(async () => {
     const deadline = g.stage.timerSec > 0 ? serverNow() + g.stage.timerSec * 1000 : 0;
     sealing.current = null;
+    pulling.current = null;
     await openQuestion(sync, ROLE.HOST, deadline);
   });
 
@@ -270,6 +294,7 @@ export default function HostGame({ sync, room, roomCode, catalog, exposure, onEd
     // Re-opening restores `state: 'open'`, which is what unlocks the options
     // again (V2-15). Locks already committed stay committed.
     sealing.current = null;
+    pulling.current = null;
     const deadline = g.stage.timerSec > 0 ? serverNow() + g.stage.timerSec * 1000 : 0;
     await openQuestion(sync, ROLE.HOST, deadline);
   });
@@ -292,6 +317,7 @@ export default function HostGame({ sync, room, roomCode, catalog, exposure, onEd
     await skipQuestion(sync, ROLE.HOST);
     fulfilling.current = null;
     sealing.current = null;
+    pulling.current = null;
   });
 
   const handleRelease = guard(async () => {

@@ -24,19 +24,25 @@ import { buildBoard, tierSizeFor } from '../src/engine/board.js';
 import { advanceTurn, rotationOrderMode } from '../src/engine/scheduler.js';
 import { MODES } from '../src/engine/scoring.js';
 
-test('Contestants maps onto the engine modes, and contest is never one of them (V2-9)', () => {
-  assert.equal(modeFor('selector'), 'exclusive');
-  assert.equal(modeFor('all'), 'community');
+test('Contestants maps onto the engine modes, and contest is never one of them (V2-9/V2-26)', () => {
+  // The 3-way Contestants setting (V2-26) writes three dedicated v2 modes.
+  assert.equal(modeFor('selector'), 'selectorOnly');
+  assert.equal(modeFor('all'), 'all');
+  assert.equal(modeFor('fastest'), 'fastest');
 
+  assert.equal(contestantsOf({ mode: 'selectorOnly' }), 'selector');
+  assert.equal(contestantsOf({ mode: 'all' }), 'all');
+  assert.equal(contestantsOf({ mode: 'fastest' }), 'fastest');
+  // Legacy v1 rounds still read back as a live Contestants value, not a blank.
   assert.equal(contestantsOf({ mode: 'exclusive' }), 'selector');
   assert.equal(contestantsOf({ mode: 'community' }), 'all');
-  // Legacy rounds still read back as something, rather than as a blank control.
   assert.equal(contestantsOf({ mode: 'suddendeath' }), 'all');
   assert.equal(contestantsOf({ mode: 'contest' }), 'all');
   assert.equal(contestantsOf(null), 'selector');
 
-  assert.ok(!isAllContest({ mode: 'exclusive' }));
-  assert.ok(isAllContest({ mode: 'community' }));
+  assert.ok(!isAllContest({ mode: 'selectorOnly' }));
+  assert.ok(isAllContest({ mode: 'all' }));
+  assert.ok(!isAllContest({ mode: 'fastest' }), 'Fastest Fingers is its own thing, not "All"');
 
   // Whatever the UI can write, `scoring.MODES` must know how to run.
   for (const c of CONTESTANTS) assert.ok(MODES[modeFor(c.value)], `mode for ${c.value} exists`);
@@ -55,7 +61,8 @@ test('a fresh Game has four Stages, all with a 30s timer (v1 defect #8)', () => 
     { contestants: 'selector', penalty: 'off', mult: 1, first: 'registration' },
     'Stage 1: intro'
   );
-  assert.equal(contestantsOf(stages[3]), 'all', 'Stage 4: everyone contests');
+  assert.equal(contestantsOf(stages[3]), 'fastest', 'Stage 4: Fastest Fingers (PRD §4)');
+  assert.equal(contestantsOf(stages[2]), 'all', 'Stage 3: everyone answers');
   assert.equal(stages[3].penalty, 'on');
   assert.ok(stages[3].multiplier >= 2);
   assert.equal(stages[3].orderMode, 'loserFirst');
@@ -76,7 +83,7 @@ test('normalizeStage repairs a partial or legacy round', () => {
   // A v1 round: no orderModeNext, a mode the v2 UI cannot write.
   const legacy = { mode: 'contest', rotations: 1, multiplier: 1, penalty: 'half', orderMode: 'loserFirst', timerSec: 0 };
   const s = normalizeStage(legacy);
-  assert.equal(s.mode, 'community', 'contest reads back as All Teams');
+  assert.equal(s.mode, 'all', 'contest reads back as the v2 All mode');
   assert.equal(s.penalty, 'off', 'half is not a v2 penalty (V2-12)');
   assert.equal(s.orderModeNext, 'loserFirst', 'absent Selects Next falls back to Selects First');
   assert.equal(s.timerSec, 0, 'an untimed Stage stays untimed');
@@ -93,7 +100,7 @@ test('stageSummary and questionsNeeded read in the Game vocabulary (V2-23)', () 
   const s = normalizeStage({ mode: 'community', rotations: 1, multiplier: 3, penalty: 'on', timerSec: 20 });
   const text = stageSummary(s);
   assert.match(text, /1 Rotation\b/);
-  assert.match(text, /All Teams/);
+  assert.match(text, /·\s*All\s*·/, 'Contestants: All');
   assert.match(text, /×3/);
   assert.match(text, /Penalty On/);
   assert.match(text, /20s Thinking Time/);

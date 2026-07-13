@@ -677,3 +677,173 @@ Next / blockers:
 - Everything else outstanding is unchanged from S2-S4.6: exposure migration
   blocked on `firebase-rules.json`; the sync-test.html/2-phone device passes;
   S6 is where those get walked before cutover.
+
+## S6 2026-07-11 - Live test protocol + pre-cutover review - Sonnet
+SCOPING NOTE: no separate "S6 REQUIREMENTS (Fable)" entry exists in this file
+(unlike S4/S4.6). Michael confirmed treating PRD §9's S6 row + the S5 entry's
+carried note ("PRE-CUTOVER FABLE REVIEW; cutover master→v2; hub links.json...
+S6's 'walked end-to-end on 2 devices + 1 display before cutover' gate is where
+that confirmation has to happen before the Fable review, not after") as the
+requirements. Recorded here rather than inventing a requirements doc after
+the fact.
+Done:
+- Baseline: `npm test` 106/106 (21 files), `npm run build` clean — unchanged
+  shape from S4.6-R9.
+- RESOLVED, contradicting every "STILL BLOCKED" note carried since S2: the two
+  Firebase steps are already done. Checked read-only, no writes: `GET
+  /rooms/<code>.json`, `/presence/<code>.json`, `/exposure.json` all return
+  200 against the live `stack-ep5` RTDB — `firebase-rules.json` is live in
+  production. (The earlier "401" probes in the S2/S3 notes were almost
+  certainly against the parent collection path — `/rooms.json` with no code —
+  which Firebase's path-scoped rules correctly deny even when
+  `rooms/$code/.read` is `true`; I re-probed at the wildcard-scoped path to
+  confirm this isn't a real gap.) `exposure.json` readback shows 230 refs
+  across 21 categories, exact match to the legacy-migration stamp
+  (`1783065124912`) that `scripts/migrate-exposure.mjs` would write — the
+  migration has already been committed by someone, outside this log. I did
+  NOT run `migrate:exposure -- --commit` myself: the harness's own auto-mode
+  classifier blocked it as an unreviewed production write against real
+  rooms/presence data, correctly — and it would have been a no-op anyway
+  since the data already matches.
+- Pre-cutover code review (standing in for the Fable review this session
+  can't self-supply): re-read `HostGame.jsx`, `DisplayGame.jsx`,
+  `PlayGame.jsx`, `Peripherals.jsx`, and the `actions.js` functions behind
+  R1-R9 and the v1 defect register, cross-checked against PRD §8b and
+  DECISIONS-V2.md line by line. Confirmed in the actual code (not just the
+  prior entries' prose): R1's `lockedLetters` passed into `DisplayGame`'s
+  `Options`; R2's `openQuestion` clearing `game/question/locks` before
+  `state`/`deadline`, and `PlayGame`'s auto-lock effect keyed on `g.deadline`;
+  R3's Plus/Nothing/Minus `radiogroup`; R4's `selectedBy` threaded from
+  `selectQuestion` through `commitScores`'s log entry to `Peripherals`'
+  "Selected by "; R5's copy branching on `me.mayAnswer` before `me.missedIt`;
+  R6's podium `DisplayGame` view; R7's `showQr` effect wired only on `open`
+  via a ref (not the `host` object) and `DisplayGame`'s override check; R9's
+  `leavePreviousTeam` called from both `createTeam` and `joinTeam`. No bugs
+  found, no changes made — this sprint's fixes hold up under a second read.
+  Also confirmed `tools/sync-test.html`'s imports (`../src/sync/adapter.js`,
+  `../src/sync/driver-mock.js`) still match the current module shape.
+- Searched this machine for the Saturday Solutions hub repo (`links.json`) —
+  not present locally; that entry has to happen from wherever that repo
+  actually lives, same conclusion PROGRESS.md already recorded.
+Deviations from PRD (if any, + why):
+- Did NOT perform the actual cutover (merge `v2`→`master`, production
+  repoint, v1 archive) or the hub `links.json` entry. PRD §9's gate order is
+  explicit — live device pass, THEN Fable review, THEN cutover — and the
+  live device pass could not happen this session: `tabs_context_mcp` reported
+  "Browser extension is not connected," the same recurring blocker flagged in
+  every S1/S2/S3/S4/S5 entry, so no multi-tab/multi-device walkthrough of the
+  defect register or `tools/sync-test.html`'s 3-tab checklist was possible,
+  and there were no physical phones to substitute. Running cutover without
+  that gate would be deviating from the locked plan, not executing it, and a
+  production repoint is exactly the kind of action worth confirming rather
+  than assuming. Treating "no requirements doc + no way to satisfy the gate"
+  as license to skip straight to "Prod repointed; v1 archived" would have
+  been the actual deviation.
+Vitest: 106 passed / 106 (21 files, unchanged from S4.6-R9 — no code touched
+  this session). `npm run build` clean, same shape.
+Next / blockers:
+- CUTOVER IS THE ONLY THING LEFT, gated on one thing: a real live pass — 2
+  phones + 1 display (or the Chrome extension reconnected so this session can
+  drive multiple tabs against the real Firebase driver) walking the defect
+  register (#1-#10) and the v2.1 register (R1-R9) end to end, plus
+  `tools/sync-test.html`'s 3-tab checklist. Once that's done and reports
+  clean, cutover is mechanical: merge `v2` into `master` (or whatever branch
+  Vercel's dashboard has bound to production) and push; then the hub
+  `links.json` entry, from the hub repo (not present on this machine).
+- Firebase rules + exposure migration: no longer blockers — confirmed live,
+  see above. Nothing further needed there.
+- Everything else (motion/tooltips/visual polish) was already S5-complete
+  and untouched this session.
+
+## S6.5 2026-07-11 - Trial-round register R10-R14 + V2-26 (3-way Contestants) - Opus
+Scope = PRD §8c (R10-R14) and DECISIONS-V2 V2-26 exactly. Done:
+- ENGINE (scoring.js), ADDITIVE — the four v1 modes (community/exclusive/
+  contest/suddendeath) are UNTOUCHED so tests/full-game.test.mjs still pins
+  the ported engine (V2-1). Added three DEDICATED v2 modes carrying the
+  amended trial-round scoring: `selectorOnly`, `all`, `fastest`. The rule that
+  holds across all three (V2-26): the SELECTING team must answer and takes the
+  no-answer penalty when Penalty is On; a NON-selecting team is scored only if
+  it answers and is penalty-exempt on silence. `fastest` differs from `all`
+  only in the selecting-team penalty condition — `all` penalizes the selector
+  on its own silence; `fastest` penalizes it only when NObody answered (raced,
+  not silent).
+- stages.js: Contestants is now 3-way (`CONTESTANTS` = Selector Only / All /
+  Fastest Fingers, V2-26). `modeFor`/`contestantsOf` remap to the three v2
+  modes; the four legacy v1 modes still read back as a live Contestants value
+  (MODE_TO_CONTESTANTS keeps them) so a room persisted before this change
+  renormalizes cleanly rather than showing a blank control (V2-9: contest stays
+  unsurfaced). R14: ORDER_MODES labels renamed "Winner First"->"Winning Team",
+  "Loser First"->"Lowest Score"; the `winnerFirst`/`loserFirst` VALUES and the
+  registration tiebreak are unchanged, so the scheduler and every persisted
+  room need no migration. `everyoneAnswers()` added (true for All + Fastest);
+  `isAllContest()` kept (now strictly "All"). defaultStages Stage 3 -> All,
+  Stage 4 -> Fastest Fingers, matching PRD §4's named bookends.
+- game.js: `lockEnding({locks,deadline,contestants,selectingTeamId})` is the
+  pure decision the Host loop consults — 'seal' (Selector Only / Fastest, on
+  the first explicit lock), 'pull' (All: only the *Selector's* explicit lock
+  ends it, by pulling the timer in), or null. Added `contestants` and
+  `selectorChoice` to the game view (R11).
+- actions.js: `pullDeadline(sync, role, deadline)` — drops the live question's
+  deadline WITHOUT clearing locks or state, unlike `openQuestion`. This is
+  R10's mechanism: the Selector's Lock In drops the timer to now, every other
+  team's device auto-locks its pending selection (V2-15's existing PlayGame
+  auto-lock, already keyed on `g.deadline` since R2), then authority effect 3
+  grace-seals. `openQuestion` would have wiped the Selector's own answer.
+- HostGame.jsx (R10): authority effect 2 rewritten to branch on `lockEnding` —
+  seal immediately for Selector Only/Fastest, or pull-then-grace-seal for All.
+  A new `pulling` ref guards the pull to once per question (the pulled deadline
+  re-triggers the effect). The old "seal on ANY explicit lock" path now lives
+  only in Fastest Fingers.
+- PlayGame.jsx (R12): the pre-reveal status messages collapse into ONE
+  fixed-height reserved slot above the A-D grid, so an alert appearing (the
+  question sealing when a team Locks In) can no longer reflow the options and
+  push a mid-tap from D onto C. Options already disable the instant the
+  question leaves `open` (via `answering`), so a tap during the transition
+  can't register — belt and suspenders. Also: the selecting-team no-answer
+  copy now warns of the penalty when it applies (V2-26), except in Fastest
+  Fingers when someone else answered (raced, not penalized).
+- DisplayGame.jsx (R11): pre-reveal highlights ONLY the Selector's locked
+  letter (`g.selectorChoice`), never another team's — in All a non-selector's
+  lock does not end the question (R10), so showing every lock would leak
+  answers. Pre-reveal Contestants text is now 3-way (Fastest Fingers / All +
+  "X controls the finish" / Selector Only).
+- HostSetup / Peripherals: no code change — both are data-driven off CONTESTANTS
+  and ORDER_MODES, so the 3-way control and R14 labels flow through.
+Deviations from PRD (if any, + why):
+- defaultStages changed Stage 3 -> All and Stage 4 -> Fastest Fingers (were
+  community/community). PRD §4 now names Stage 4 as Fastest Fingers, so this
+  aligns the default with the doc; every field stays editable before Begin.
+- R12 fixed with a reserved fixed-height slot + instant disable, NOT a floating
+  absolute overlay. Reserved space is simpler, can't be clipped, and satisfies
+  "must not reflow the grid" + "disable the options the instant the alert
+  appears." Flag if a floating banner is specifically wanted.
+- vite.config.js: raised testTimeout/hookTimeout to 20000. The jsdom
+  live-screen tests each finish in ~2-3s in isolation but the forks pool runs
+  all files concurrently, and under that CPU contention the 5s default
+  intermittently tripped on correct work (observed 2-3 timeouts per full run
+  pre-change, 0 after). Not a logic change; a genuine hang still fails inside
+  the window.
+Vitest: 119 passed / 119 (23 files). New: contestants-modes (7 — scoreOutcome
+  for all three modes incl. penalty on/off, selecting-team no-answer penalty,
+  Fastest ties + raced-selector, and `lockEnding` for every mode incl. untimed),
+  live-all-mode (1 jsdom — the R10 flow end to end through the real Host+Player
+  screens: Selector Locks In, the other team's PENDING selection is captured,
+  both score). Extended: live-loop (+4, real driver — All selector-control,
+  All selecting-team no-answer penalty, Fastest first-press, Fastest ties),
+  display-game (+1 — R11 shows only the Selector's lock). Updated for the new
+  mapping/labels/scoring: stages.test, game-view.test. Pre-existing S1-S6
+  suites all still green. `npm run build` clean (366kB main chunk;
+  pre-existing INEFFECTIVE_DYNAMIC_IMPORT warning for exposure.js unrelated,
+  untouched).
+Next / blockers:
+- NOT observed in a real browser (standing caveat, every prior session): R11's
+  Display highlight, R12's no-reflow on a real phone at a real viewport, and
+  the R10 All-mode capture across physical devices. All verified via jsdom +
+  the real mock driver, not eyes on a screen. Folds into S6's owed device pass.
+- Branch is `v2`, per constraints — NOT cut over to master. Working tree
+  UNCOMMITTED. Michael, in C:\Users\user\Trivia (PowerShell): `npm test` then
+  `git add -A` then `git commit -m "S6.5: trial-round R10-R14 + V2-26 3-way
+  Contestants (Opus)"` then `git push`.
+- The S6 cutover gate (live 2-phone + 1-display pass of the defect + trial
+  registers before the Fable review) is unchanged and still owed — R10-R14 now
+  need walking live alongside #1-#10 and R1-R9.

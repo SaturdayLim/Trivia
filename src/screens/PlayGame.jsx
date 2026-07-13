@@ -287,6 +287,34 @@ export default function PlayGame({ sync, room, roomCode, clientId, teamId, onExi
 
   const answering = me.mayAnswer && g.qState === 'open';
 
+  // R5 + V2-26: the copy branches on answer-eligibility (`me.mayAnswer`) first,
+  // not on lock state. A Team that was never eligible isn't told "no answer" —
+  // of course they didn't, they couldn't. The selecting Team that missed, when
+  // Penalty is On, is warned it is penalized (in Fastest Fingers only when
+  // nobody answered at all — otherwise it was raced, not silent).
+  let status = null;
+  if (!revealing) {
+    if (me.mayAnswer && g.qState === 'selecting') {
+      status = <Banner>Get ready. The options open when the Host starts the timer.</Banner>;
+    } else if (!me.mayAnswer) {
+      status = (
+        <Banner>
+          {me.missedIt ? 'Time is up.' : `Only ${g.activeTeamName} may answer this Stage. Watch along.`}
+        </Banner>
+      );
+    } else if (me.missedIt) {
+      const noOneAnswered = Object.keys(g.locks).length === 0;
+      const selectorPenalty =
+        me.isActiveTeam && g.stage.penalty === 'on' && (g.contestants !== 'fastest' || noOneAnswered);
+      status = (
+        <Banner tone="warn">
+          Time is up. No answer from {me.teamName}
+          {selectorPenalty ? ' — your Team takes the no-answer penalty.' : ' — no points, and no penalty.'}
+        </Banner>
+      );
+    }
+  }
+
   return wrap(
     <>
       <QuestionHeader
@@ -306,20 +334,12 @@ export default function PlayGame({ sync, room, roomCode, clientId, teamId, onExi
         )}
       </div>
 
-      {/* R5: the copy branches on answer-eligibility (`me.mayAnswer`), not on
-          lock state. A Team that was never eligible to answer isn't told
-          "no answer" once time is up — of course they didn't answer, they
-          couldn't — they just see that time is up. The fuller "no answer"
-          caveat is for a Team that COULD have answered and didn't. */}
-      {me.mayAnswer && g.qState === 'selecting' && (
-        <Banner>Get ready. The options open when the Host starts the timer.</Banner>
-      )}
-      {me.mayAnswer && me.missedIt && !revealing && (
-        <Banner tone="warn">Time is up. No answer from {me.teamName} — no points, and no penalty.</Banner>
-      )}
-      {!me.mayAnswer && !revealing && (
-        <Banner>{me.missedIt ? 'Time is up.' : `Only ${g.activeTeamName} may answer this Stage. Watch along.`}</Banner>
-      )}
+      {/* R12: one reserved status slot of fixed height above the options. An
+          alert appearing (the question sealing when a Team Locks In) must NOT
+          reflow the A-D grid — a moving grid is what pushed a mid-tap from D
+          onto C. The options also disable the instant the question leaves
+          `open` (via `answering`), so a tap during the transition can't register. */}
+      <div className="min-h-[3.5rem]">{status}</div>
 
       <Options
         options={g.question.payload.options}

@@ -55,8 +55,9 @@ intents (join, select, lock); engine reduces; Display is read-only.
 2. Category selection: uniform-size tiles (defect #2), each showing icon + available
    count; empty/depleted categories unselectable until exposure reset. Confirm.
 3. Stage setup: 4 Stages listed; per stage — Rotations count, Thinking Time (default 30s),
-   Penalty On/Off, Contestants Selector-only/All, Multiplier (integer), Who-Selects-First
-   (Registration/Winner/Loser), Who-Selects-Next (Registration/Winner/Loser). All numeric
+   Penalty On/Off, Contestants (Selector Only / All / Fastest Fingers; V2-26), Multiplier
+   (integer), Who-Selects-First (Registration / Winning Team / Lowest Score), Who-Selects-Next
+   (Registration / Winning Team / Lowest Score). All numeric
    fields typeable AND steppable (defect #9); dropdowns stay open until explicit selection
    (defect #7). Confirm.
 4. Lobby (can go Back to revise anything) → Begin.
@@ -74,34 +75,54 @@ intents (join, select, lock); engine reduces; Display is read-only.
 2. Selector turn (team-level): remaining categories shown to the whole team; first member
    to tap claims control and locks teammates' selection UI until Back (V2-14). Then
    difficulty (Easy/Med/Hard; unavailable tiers disabled) → options A–D + Lock In.
-3. ALL-contestant stages: every team's players get options when Host starts the timer.
+3. Contestant eligibility depends on the stage's Contestants setting (V2-26):
+   - **Selector Only** — only the selecting team gets options; every other team's options
+     are disabled when the Host starts the timer.
+   - **All** — every team's players get options; the **Selector controls the end** — the
+     question ends on the Selector's lock-in (or timer expiry). At that moment any other
+     team with an unlocked selection is treated as locked in with it (R10).
+   - **Fastest Fingers** — every team's players get options; the **first team to answer**
+     ends the question and scores; ties on timing all score (R13).
 4. Lock In: shows their letter full-screen (big white letter on black) until Host updates.
-   Leaving that view does NOT disqualify (V2-16). A lock-in zeroes the timer and locks
-   everyone else (V2-15).
-5. No selection when timer hits 0 = no answer: 0 points, penalty-exempt (V2-16).
+   Leaving that view does NOT disqualify (V2-16). End-of-question semantics per mode
+   (V2-15/V2-26): in **All**, only the *Selector's* lock-in zeroes the timer and locks
+   everyone (a non-selector's lock only locks that team); in **Fastest Fingers**, the first
+   lock (any team) zeroes the timer and locks everyone; in **Selector Only**, only the
+   Selector can lock.
+5. No selection when timer hits 0 = no answer. A **non-selecting** team that does not
+   answer is penalty-exempt (0). The **selecting team must answer** — if it does not, it
+   takes the no-answer penalty when Penalty is On, in all three modes (V2-16/V2-26).
 
 ### 3.4 Display flow (landscape desktop / landscape phone)
 View-only progression: Home (scores, stage settings, available categories) →
 difficulty-selection view (remaining counts per tier) → question view (category tinted
-green/yellow/red by difficulty, question, A–D, countdown, selector name) → reveal view
-(answers colored, points deltas) → back to Home on Update. Lobby shows QR + room code.
+green/yellow/red by difficulty, question, A–D, countdown, selector name; pre-reveal it
+highlights the **Selector's** selected/locked option, not any other team's — R11) →
+reveal view (answers colored, points deltas) → back to Home on Update. Lobby shows QR +
+room code.
 
 ## 4. Game model
 
 - **Game** = up to 4 Stages. **Stage** = settings bundle + N Rotations. **Rotation** =
   one selection turn per team in order. Typical: Stage 1 intro (30s, no penalty,
-  selector-only, ×1, registration order), Stage 4 sudden death (penalty, all contest,
-  ×2–3, loser-first).
-- Turn order: Who-Selects-First seeds the stage (Registration/Winner/Loser); Who-Selects-Next
-  orders each subsequent cycle (Registration/Winner/Loser); ties broken by registration
-  order (V2-10). New teams slot below existing order.
+  Selector Only, ×1, registration order), Stage 4 sudden death (penalty, Fastest Fingers,
+  ×2–3, lowest-score first).
+- Turn order: Who-Selects-First seeds the stage (Registration / Winning Team / Lowest
+  Score); Who-Selects-Next orders each subsequent cycle (Registration / Winning Team /
+  Lowest Score); ties broken by registration order (V2-10). New teams slot below existing order.
 - **Board draw** (V2-17): per-category setting N ("Questions per tier"); draw randomly up
   to N per difficulty tier from unexposed pool; short tiers contribute what they have.
 - **Scoring**: base 1/2/3 (Easy/Med/Hard) × stage multiplier; penalty (if On) = −value on
-  wrong lock; no answer = 0 always. Host sign-toggle before commit (V2-11).
+  a wrong lock, or on **no-answer by the selecting team** (the Selector must answer — all
+  three Contestants modes, V2-26). A non-selecting team that does not answer is
+  penalty-exempt (0). In Fastest Fingers, only the first-answering team(s) score; if no team
+  answers, the selecting team takes the no-answer penalty when Penalty is On. Host sign-toggle
+  before commit (V2-11).
 - **Exposure**: written to Firebase at reveal; exposed questions excluded from future
   draws in all future games; Host can reset per category (unlocks depleted categories).
-- Single correct answer per question (V2-7). Contest mode not surfaced (V2-9).
+- Single correct answer per question (V2-7). The dormant engine "contest/challenge" mode
+  stays unsurfaced (V2-9) — note this is unrelated to the new **Fastest Fingers** Contestants
+  setting (V2-26), which is answer-eligibility, not the steal/challenge mechanic.
 
 ## 5. Content pipeline
 
@@ -163,6 +184,20 @@ Host and Player screens.
 | R9 | B | Team switch double-counts the player | Moving to another team (Back → create/join) must remove the player from their previous team's roster. A team left with zero players is deleted while status=waiting (lobby); mid-game it survives (scores must persist). Lobby counts derive from rosters, so they self-correct. |
 | R8 | E | Quickstart preset | HostSetup pre-selects the game-night ten on room creation (editable): 2000s Pop, Desserts, Etymology, Flags, Inventions, Legends, Marvel, Memes, Ocean, Place Names. Wire from `public/questions/game-defaults.json` (v1 decision #32 — same ten, already shipped). |
 
+## 8c. Trial-round register — first live 5-team round (Michael, 2026-07-11, MUST-FIX before cutover)
+
+From the first live trial (5 teams × 2 players + 1 host + 1 display). These findings
+amend locked decisions — see DECISIONS-V2 V2-10/V2-15/V2-16 and new V2-26. B = bug,
+E = enhancement. Acceptance = the described behavior on Display, Host and Player screens.
+
+| # | Type | Finding | Required behavior |
+|---|---|---|---|
+| R10 | B | "All" contestant stage ends on first press by ANY team, not on the Selector | The **Selector has exclusive control** of the question and must answer it. The question ends when the **Selector locks in** (or the timer expires). At that moment, any other team that has made a selection but not explicitly locked is treated as **locked in with its current selection**. Supersedes the current first-press-wins behavior for "All" — that behavior now lives only in the new Fastest Fingers mode (R13). See V2-15, V2-26. |
+| R11 | B | Display shows the first-selecting team's answer | Pre-reveal, the Display shows the **Selector's** (the designated representative of the selecting team) selected/locked option — not whichever team selected first. Refines R1. See V2-26. |
+| R12 | B | Lock-in alert shifts the options grid → mis-taps (aiming for "D", the alert bar pushes the layout down so the tap lands on "C") | The "someone has locked in" alert must **not reflow the options**. Render it as a fixed overlay / reserved banner space that does not move the A–D grid, and **disable the options immediately** when the alert appears so a mid-tap cannot register a wrong letter. |
+| R13 | E | Need a first-to-answer race mode | New **Contestants** setting is now a 3-way choice: **Selector Only / All / Fastest Fingers**. (a) **Selector Only** — when the question is revealed, every non-selecting team's options are disabled; only the Selector answers. (b) **All** — every team may answer up to the Selector's lock-in (R10); the Selector controls the end. (c) **Fastest Fingers First** (ties allowed) — the first team to answer wins the points (or penalty); if two or more teams tie on timing, all tied teams score. Scoring/penalty rules for all three modes: see V2-26. |
+| R14 | E | Order labels unclear ("Winner First" / "Loser First") | Rename the Who-Selects-First / Who-Selects-Next options: **"Winner First" → "Winning Team"**, **"Loser First" → "Lowest Score"**. Registration stays. Tiebreakers still by registration order. See V2-10. |
+
 ## 9. Build plan & agent delegation
 
 Per STANDING-ORDERS: Sonnet for well-specified execution, Opus for complex phases,
@@ -179,6 +214,7 @@ PROGRESS.md. Suggested phases:
 | 4.6 | Bugfix sprint: v2.1 register R1–R8 (§8b) — priority over S5 for game night | Sonnet |
 | 5 | Design pass: Solutions suite, tooltips, copy standardization, defect sweep #2–#9 | Sonnet |
 | 6 | Cross-device live test protocol + fixes; cutover master→v2; hub links.json entry | Sonnet + Michael |
+| 6.5 | Trial-round register R10–R14 (§8c) — MUST-FIX before cutover. R10/R13 (3-way Contestants mode + selector-control/FFF end + scoring) touch engine logic → Opus; R11/R12/R14 (display selector answer, lock-in layout fix, order relabel) → Sonnet | Opus (logic) + Sonnet (UI) |
 | — | Stack logo design | Separate task (Fable-supervised; agents weak here historically) |
 | — | Admin UI mini-project | Opus (ADMIN-UI-BRIEF.md) |
 

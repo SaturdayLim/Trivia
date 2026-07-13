@@ -38,8 +38,25 @@ const sessions = [];
  * already seated and runs as an ordinary client of this serializer. Sharing the
  * clientId would fuse the two sessions into one wire identity and split the
  * authority in two — which never happens with one real Host device.
+ *
+ * Defaults reproduce the original single-Team (Alpha, Ann + Bea) shape every
+ * existing caller relies on. `opts` lets a test seed a different Contestants
+ * mode or more Teams without duplicating this plumbing:
+ * @param {string} roomCode
+ * @param {Object} [opts]
+ * @param {(rounds: Object[]) => Object[]} [opts.stages] - transform the default
+ *   Stages (e.g. force Stage 1 into "All" mode).
+ * @param {Array<{id,name,color,order}>} [opts.teams]
+ * @param {Array<{teamId,playerId,playerName}>} [opts.players]
  */
-export async function seedPlayingRoom(roomCode) {
+export async function seedPlayingRoom(roomCode, opts = {}) {
+  const teams = opts.teams || [{ id: 't1', name: 'Alpha', color: '#FFE600', order: 0 }];
+  const players = opts.players || [
+    { teamId: 't1', playerId: 'p1', playerName: 'Ann' },
+    { teamId: 't1', playerId: 'p2', playerName: 'Bea' },
+  ];
+  const stages = (opts.stages || ((r) => r))(defaultStages().map((s) => ({ ...s, rotations: 1, timerSec: 30 })));
+
   const host = await createSync({
     driver: driverMock, roomCode, clientId: 'seed-gm', role: 'gm', create: true, initialState: {},
   });
@@ -48,9 +65,9 @@ export async function seedPlayingRoom(roomCode) {
   await A.createRoomState(host, 'gm', {
     clientId: 'gm1',
     hostPin: '1234',
-    teams: [{ id: 't1', name: 'Alpha', color: '#FFE600', order: 0 }],
+    teams,
     settings: {
-      rounds: defaultStages().map((s) => ({ ...s, rotations: 1, timerSec: 30 })),
+      rounds: stages,
       orderRecalc: 'perRotation',
       categories: ['movies'],
       tierSizes: { movies: 1 },
@@ -59,8 +76,7 @@ export async function seedPlayingRoom(roomCode) {
     },
   });
   await A.registerClient(host, { clientId: 'gm1', role: 'gm', name: 'Host' });
-  await A.joinTeam(host, { teamId: 't1', playerId: 'p1', playerName: 'Ann' });
-  await A.joinTeam(host, { teamId: 't1', playerId: 'p2', playerName: 'Bea' });
+  for (const p of players) await A.joinTeam(host, p);
 
   await A.setBoard(host, 'gm', { movies: { E: ['E1'], M: ['M1'], H: ['H1'] } });
   const started = await A.startGame(host, 'gm');

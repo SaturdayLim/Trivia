@@ -15,3 +15,6 @@ Thumbs.db
 .DS_Store
 
 .vercel
+
+/exposure-dump.json
+/EEXR*

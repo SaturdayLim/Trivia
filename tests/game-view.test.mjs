@@ -108,10 +108,15 @@ test('who may answer follows the Stage, and the engine mode decides (not the UI)
   assert.ok(mayAnswer(everyone, 't1'));
   assert.ok(mayAnswer(everyone, 't2'), 'All Teams contest');
 
+  // Fastest Fingers also lets every Team answer (the first to lock ends it).
+  const fastest = makeRoom({ stage: { mode: modeFor('fastest') }, game: { question: question() } });
+  assert.ok(mayAnswer(fastest, 't1'));
+  assert.ok(mayAnswer(fastest, 't2'), 'Fastest Fingers: everyone races');
+
   // The screen and the write-path guard consult the same function.
   assert.equal(
     mayAnswer(selectorOnly, 't2'),
-    MODES.exclusive.mayAnswer('t2', {
+    MODES[modeFor('selector')].mayAnswer('t2', {
       locks: {}, correct: null, roundCfg: selectorOnly.settings.rounds[0], selectingTeamId: 't1', teamIds: ['t1', 't2'], value: 2,
     })
   );
@@ -139,7 +144,9 @@ test('selectMe: the claim locks teammates out, and other Teams are not "locked o
   assert.ok(!selectMe(claimed, { playerId: 'p3', teamId: 't2' }).lockedOut, 'stale claim ignored');
 });
 
-test('selectMe: no answer at expiry is not a disqualification (V2-16)', () => {
+test('selectMe: a Team that never locked is not disqualified, but the SELECTING Team is penalized (V2-16/V2-26)', () => {
+  // t1 (Alpha) is the selecting Team and never locks; t2 (Bravo) is a
+  // non-selecting Team that locked a wrong answer.
   const room = makeRoom({
     stage: { mode: modeFor('all') },
     game: { question: question({ state: 'locked', locks: { t2: { playerId: 'p3', choice: 'A', at: 5 } } }) },
@@ -152,10 +159,12 @@ test('selectMe: no answer at expiry is not a disqualification (V2-16)', () => {
 
   const silent = selectMe(room, { playerId: 'p1', teamId: 't1' });
   assert.ok(!silent.hasLocked);
-  assert.ok(silent.missedIt, 'the screen can say "no answer"…');
+  assert.ok(silent.missedIt, 'the screen can say "no answer" — not a DQ (V2-16)');
 
-  // …and the engine scores that as zero, never as a penalty.
-  const { deltas } = MODES.community.scoreOutcome({
+  // V2-26 amends the scoring: the *selecting* Team must answer and takes the
+  // no-answer penalty when Penalty is On; a non-selecting Team is scored on its
+  // lock. (V2-16's "never penalized" now applies only to non-selecting Teams.)
+  const { deltas } = MODES.all.scoreOutcome({
     locks: room.game.question.locks,
     correct: 'B',
     roundCfg: { ...room.settings.rounds[0], penalty: 'on' },
@@ -163,8 +172,21 @@ test('selectMe: no answer at expiry is not a disqualification (V2-16)', () => {
     teamIds: ['t1', 't2'],
     value: 2,
   });
-  assert.equal(deltas.t1, 0, 'no lock, no penalty (V2-16)');
+  assert.equal(deltas.t1, -2, 'the selecting Team that did not answer takes the no-answer penalty (V2-26)');
   assert.equal(deltas.t2, -2, 'a wrong lock is penalized');
+
+  // A NON-selecting Team that stays silent is still exempt (0), never penalized —
+  // only the selecting Team (t1) eats the no-answer penalty here.
+  const { deltas: silentAll } = MODES.all.scoreOutcome({
+    locks: {},
+    correct: 'B',
+    roundCfg: { ...room.settings.rounds[0], penalty: 'on' },
+    selectingTeamId: 't1',
+    teamIds: ['t1', 't2'],
+    value: 2,
+  });
+  assert.equal(silentAll.t2, 0, 'non-selecting silent Team is exempt');
+  assert.equal(silentAll.t1, -2, 'selecting silent Team is penalized');
 });
 
 test('an explicit Lock In seals the question; an expiry auto-lock does not (V2-15)', () => {
