@@ -198,6 +198,44 @@ E = enhancement. Acceptance = the described behavior on Display, Host and Player
 | R13 | E | Need a first-to-answer race mode | New **Contestants** setting is now a 3-way choice: **Selector Only / All / Fastest Fingers**. (a) **Selector Only** — when the question is revealed, every non-selecting team's options are disabled; only the Selector answers. (b) **All** — every team may answer up to the Selector's lock-in (R10); the Selector controls the end. (c) **Fastest Fingers First** (ties allowed) — the first team to answer wins the points (or penalty); if two or more teams tie on timing, all tied teams score. Scoring/penalty rules for all three modes: see V2-26. |
 | R14 | E | Order labels unclear ("Winner First" / "Loser First") | Rename the Who-Selects-First / Who-Selects-Next options: **"Winner First" → "Winning Team"**, **"Loser First" → "Lowest Score"**. Registration stays. Tiebreakers still by registration order. See V2-10. |
 
+## 8d. Post-cutover backlog — v2.2 (EEXR 07-11 round feedback + Michael, 2026-07-13)
+
+NOT yet built. Tooltip copy below is FINAL wording (for the (?) click-in tooltips,
+`src/state/stages.js` FIELD_HELP); features are specs for a future sprint.
+
+### Tooltip copy (final)
+| Field | Tooltip |
+|---|---|
+| Thinking Time | Max number of seconds the Selector gets to lock in their answer. |
+| Multiplier | Points and penalties in this Stage (Easy 1, Med 2, Hard 3) are multiplied by this number. 0 means no points/penalty (trial round). |
+| Penalty | When On, a wrong answer attracts a penalty of the same question-multiplier value. A Selector-team non-answer can be penalized; Community (non-selecting) non-answers are not. |
+| Contestants — All | Every Team answers, but the Selector controls the end: the question closes when the Selector Locks In (or time runs out), and every other Team is locked in at its current selection. |
+| Who Selects First | Which Team takes the first turn of each Rotation in this Stage: Registration order, whoever is currently in the lead, or whoever is most behind on points. |
+
+### Features (R15–R22)
+- **R15 New Team → "Lead"**: the team-creator is designated Lead and may set the team's colour to any unused colour (non-black/white base range).
+- **R16 Thinking Time "Off"**: display "Off" instead of 0 (host entering 0 renders as "Off").
+- **R17 Testing mode**: a way to play without locking question exposure — test games must NOT write exposure / must not spend questions.
+- **R18 Game Info (i)**: a corner (i) tab showing the app version number.
+- **R19 Live scoring bar** (Display/scores): horizontal, normalized at a central "0" line, teams ranked by top NET scorer (points − penalties). Rules:
+  - All teams 0 → no bars, just the "0" indicator.
+  - Net-positive team: a grey bar (= penalty size) left of 0, the "0" line (no subtitle), then a green bar (= points − penalties) right of 0. (10 pts / 3 pen → grey "3" left, green "7" right.)
+  - Heavily-penalized team (3 pts / 15 pen): left of 0 — a right-justified grey bar (the points/penalty overlap, "3") and a left-justified red bar (remaining penalty, "12"); a blank gap where the leader's net sits; a totals box on the right showing net ("-12").
+  - Even team (10 pts / 10 pen): a right-justified grey "10" bar left of the "0" line (no "0" subtitle); totals box reads "0".
+  - Totals box shows each team's net.
+- **R20 Show QR — players**: give Players their own "Show QR Code" (opens ONLY on their device, to bring new joiners to the player-registration page). When the HOST hits Show QR, it PAUSES the game and shows the QR on every device; players may close their own popup, but Displays keep showing it until the Host exits the view.
+- **R21 History page**: track and display game stats across games.
+- **R22 Question-bank access control**: new entry flow "Start Game / Join A Game / Add Questions"; "Start Game" asks whether the player has their own question-base or wants general questions. Move all non-Claude questions into a private, password-gated bank (add a settings folder to hold passwords + new banks; currently empty). Questions can span banks; "Choose Your Category" gains an "Add Question Bank" option. Placeholder password for pre-existing banks = the set they were played in (e.g. `2612EEXR`).
+  Bank creation is ADMIN-ONLY (only Michael sees "Add Question Bank"); once a bank exists (e.g.
+  `2619-Iris`), anyone with its code can add/edit/remove its questions and categories. Anti-sabotage
+  caps: ≤30 questions per category, ≤20 categories per bank. Add a **subcategory viewer** — a single
+  prep screenshot per category showing the topic spread players will face (e.g. easter eggs / colours
+  / origin / characters).
+
+### Feedback / design notes
+- **KEEP**: the green player-join light — its fast updates make the game feel live and player-aware.
+- **FFF fairness (revisit before competitive use)**: Fastest Fingers First disadvantaged desktop + larger/slower phones; some players tapped "D" simply because it was nearest for a fast double-tap. Consider an input-latency handicap or de-emphasizing FFF.
+
 ## 9. Build plan & agent delegation
 
 Per STANDING-ORDERS: Sonnet for well-specified execution, Opus for complex phases,
